@@ -1,0 +1,78 @@
+// Typed fetch client. All geo endpoints speak GeoJSON.
+
+const BASE = import.meta.env.VITE_API_BASE || '/api';
+
+export interface Farm {
+  id: string;
+  name: string;
+  owner: string | null;
+  created_at: string;
+}
+
+export type GeometryType = 'Point' | 'LineString' | 'Polygon';
+
+export interface GeoJsonGeometry {
+  type: GeometryType;
+  coordinates: unknown;
+}
+
+export interface GeoJsonFeature<
+  P extends Record<string, unknown> = Record<string, unknown>,
+> {
+  type: 'Feature';
+  id?: string;
+  geometry: GeoJsonGeometry | null;
+  properties: P;
+}
+
+export interface GeoJsonFeatureCollection<
+  P extends Record<string, unknown> = Record<string, unknown>,
+> {
+  type: 'FeatureCollection';
+  features: GeoJsonFeature<P>[];
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const api = {
+  listFarms: () => request<Farm[]>('/farms'),
+  getFarm: (id: string) => request<Farm>(`/farms/${id}`),
+  createFarm: (body: { name: string; owner?: string | null }) =>
+    request<Farm>('/farms', { method: 'POST', body: JSON.stringify(body) }),
+
+  listPaddocks: (farmId: string) =>
+    request<GeoJsonFeatureCollection>(`/farms/${farmId}/paddocks`),
+  listPolyRuns: (farmId: string) =>
+    request<GeoJsonFeatureCollection>(`/farms/${farmId}/poly-runs`),
+  listFeatures: (farmId: string) =>
+    request<GeoJsonFeatureCollection>(`/farms/${farmId}/features`),
+
+  createPaddock: (farmId: string, f: GeoJsonFeature) =>
+    request<GeoJsonFeature>(`/farms/${farmId}/paddocks`, {
+      method: 'POST',
+      body: JSON.stringify(f),
+    }),
+  createPolyRun: (farmId: string, f: GeoJsonFeature) =>
+    request<GeoJsonFeature>(`/farms/${farmId}/poly-runs`, {
+      method: 'POST',
+      body: JSON.stringify(f),
+    }),
+  createFeature: (farmId: string, f: GeoJsonFeature) =>
+    request<GeoJsonFeature>(`/farms/${farmId}/features`, {
+      method: 'POST',
+      body: JSON.stringify(f),
+    }),
+
+  exportPdfUrl: (farmId: string) => `${BASE}/farms/${farmId}/export-pdf`,
+};

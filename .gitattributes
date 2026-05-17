@@ -1,0 +1,18 @@
+# Force LF for everything that gets COPYed into Linux containers or executed
+# there, regardless of the committer's core.autocrlf setting.
+* text=auto eol=lf
+
+*.sql        text eol=lf
+Dockerfile   text eol=lf
+*.conf       text eol=lf
+*.sh         text eol=lf
+*.ts         text eol=lf
+*.tsx        text eol=lf
+*.json       text eol=lf
+*.yml        text eol=lf
+
+# Binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.woff2 binary

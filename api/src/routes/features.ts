@@ -23,6 +23,7 @@ const featureInput = z.object({
     .object({
       type: featureType,
       name: z.string().nullish(),
+      color: z.string().nullish(),
       notes: z.string().nullish(),
     })
     .passthrough(),
@@ -33,12 +34,13 @@ interface GeoRow {
   geojson: string | null;
   type: string;
   name: string | null;
+  color: string | null;
   notes: string | null;
   created_at: string;
 }
 
 const SELECT = `
-  SELECT id, type, name, notes, created_at, ST_AsGeoJSON(geom) AS geojson
+  SELECT id, type, name, color, notes, created_at, ST_AsGeoJSON(geom) AS geojson
     FROM features WHERE farm_id = $1`;
 
 featuresRouter.get(
@@ -56,13 +58,15 @@ featuresRouter.post(
   asyncHandler(async (req, res) => {
     const body = featureInput.parse(req.body);
     const { rows } = await query<GeoRow>(
-      `INSERT INTO features (farm_id, type, name, notes, geom)
-       VALUES ($1,$2,$3,$4, ST_SetSRID(ST_GeomFromGeoJSON($5), 4326))
-       RETURNING id, type, name, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
+      `INSERT INTO features (farm_id, type, name, color, notes, geom)
+       VALUES ($1,$2,$3,$4,$5, ST_SetSRID(ST_GeomFromGeoJSON($6), 4326))
+       RETURNING id, type, name, color, notes, created_at,
+                 ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.farmId,
         body.properties.type,
         body.properties.name ?? null,
+        body.properties.color ?? null,
         body.properties.notes ?? null,
         JSON.stringify(body.geometry),
       ],
@@ -80,15 +84,18 @@ featuresRouter.patch(
       `UPDATE features SET
          type = COALESCE($3, type),
          name = COALESCE($4, name),
-         notes = COALESCE($5, notes),
-         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($6), 4326), geom)
+         color = COALESCE($5, color),
+         notes = COALESCE($6, notes),
+         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($7), 4326), geom)
        WHERE id = $1 AND farm_id = $2
-       RETURNING id, type, name, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
+       RETURNING id, type, name, color, notes, created_at,
+                 ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.featureId,
         req.params.farmId,
         p.type ?? null,
         p.name ?? null,
+        p.color ?? null,
         p.notes ?? null,
         body.geometry ? JSON.stringify(body.geometry) : null,
       ],

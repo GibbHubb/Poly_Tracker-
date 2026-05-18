@@ -11,7 +11,11 @@ const featureInput = z.object({
   type: z.literal('Feature').optional(),
   geometry: geometrySchema,
   properties: z
-    .object({ name: z.string().min(1), notes: z.string().nullish() })
+    .object({
+      name: z.string().min(1),
+      color: z.string().nullish(),
+      notes: z.string().nullish(),
+    })
     .passthrough(),
 });
 
@@ -19,12 +23,13 @@ interface GeoRow {
   id: string;
   geojson: string | null;
   name: string;
+  color: string | null;
   notes: string | null;
   created_at: string;
 }
 
 const SELECT = `
-  SELECT id, name, notes, created_at, ST_AsGeoJSON(geom) AS geojson
+  SELECT id, name, color, notes, created_at, ST_AsGeoJSON(geom) AS geojson
     FROM paddocks WHERE farm_id = $1`;
 
 paddocksRouter.get(
@@ -42,12 +47,13 @@ paddocksRouter.post(
   asyncHandler(async (req, res) => {
     const body = featureInput.parse(req.body);
     const { rows } = await query<GeoRow>(
-      `INSERT INTO paddocks (farm_id, name, notes, geom)
-       VALUES ($1, $2, $3, ST_SetSRID(ST_GeomFromGeoJSON($4), 4326))
-       RETURNING id, name, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
+      `INSERT INTO paddocks (farm_id, name, color, notes, geom)
+       VALUES ($1, $2, $3, $4, ST_SetSRID(ST_GeomFromGeoJSON($5), 4326))
+       RETURNING id, name, color, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.farmId,
         body.properties.name,
+        body.properties.color ?? null,
         body.properties.notes ?? null,
         JSON.stringify(body.geometry),
       ],
@@ -63,14 +69,16 @@ paddocksRouter.patch(
     const { rows } = await query<GeoRow>(
       `UPDATE paddocks SET
          name = COALESCE($3, name),
-         notes = COALESCE($4, notes),
-         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($5), 4326), geom)
+         color = COALESCE($4, color),
+         notes = COALESCE($5, notes),
+         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($6), 4326), geom)
        WHERE id = $1 AND farm_id = $2
-       RETURNING id, name, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
+       RETURNING id, name, color, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.paddockId,
         req.params.farmId,
         body.properties?.name ?? null,
+        body.properties?.color ?? null,
         body.properties?.notes ?? null,
         body.geometry ? JSON.stringify(body.geometry) : null,
       ],

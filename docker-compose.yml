@@ -2,15 +2,17 @@ services:
   db:
     build: ./db
     environment:
-      POSTGRES_USER: poly
-      POSTGRES_PASSWORD: poly
-      POSTGRES_DB: poly_tracker
+      POSTGRES_USER: ${POSTGRES_USER:-poly}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-poly}
+      POSTGRES_DB: ${POSTGRES_DB:-poly_tracker}
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U poly -d poly_tracker"]
+      # $$ defers to the container shell so it uses the container's env.
+      test:
+        ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -18,12 +20,19 @@ services:
   api:
     build: ./api
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://poly:poly@db:5432/poly_tracker}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-poly}:${POSTGRES_PASSWORD:-poly}@db:5432/${POSTGRES_DB:-poly_tracker}}
       MAPBOX_TOKEN: ${MAPBOX_TOKEN}
       API_PORT: ${API_PORT:-3001}
       PHOTO_STORAGE_PATH: ${PHOTO_STORAGE_PATH:-/data/photos}
+      # Docker Desktop (Windows/macOS) doesn't deliver inotify events into
+      # bind mounts; force the watcher to poll so tsx hot-reloads on edit.
+      CHOKIDAR_USEPOLLING: "true"
     volumes:
       - photo_data:/data/photos
+      # Source bind-mount so `tsx watch` hot-reloads; anonymous volume keeps
+      # the image's node_modules (host has none).
+      - ./api/src:/app/src
+      - ./api/tsconfig.json:/app/tsconfig.json
     depends_on:
       db:
         condition: service_healthy
@@ -35,6 +44,16 @@ services:
     environment:
       VITE_API_BASE: /api
       VITE_MAPBOX_TOKEN: ${MAPBOX_TOKEN}
+      # Same reason as api: poll for file changes so Vite HMR fires on edit.
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      # Source bind-mount for Vite HMR; node_modules stays from the image.
+      - ./web/src:/app/src
+      - ./web/index.html:/app/index.html
+      - ./web/vite.config.ts:/app/vite.config.ts
+      - ./web/tsconfig.json:/app/tsconfig.json
+      - ./web/tailwind.config.js:/app/tailwind.config.js
+      - ./web/postcss.config.js:/app/postcss.config.js
     depends_on:
       - api
     ports:
@@ -48,7 +67,7 @@ services:
       - api
       - web
     ports:
-      - "8080:80"
+      - "${NGINX_PORT:-8080}:80"
 
 volumes:
   db_data:

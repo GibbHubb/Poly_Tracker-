@@ -12,6 +12,7 @@ CREATE TABLE paddocks (
     farm_id    uuid NOT NULL REFERENCES farms(id) ON DELETE CASCADE,
     name       text NOT NULL,
     geom       geometry(Polygon, 4326),
+    color      text,
     notes      text,
     created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -25,6 +26,7 @@ CREATE TABLE poly_runs (
     depth_m        numeric,
     material       text,
     installed_date date,
+    color          text,
     notes          text,
     created_at     timestamptz NOT NULL DEFAULT now()
 );
@@ -35,6 +37,7 @@ CREATE TABLE features (
     type       text NOT NULL CHECK (type IN ('trough','turkey_nest','bore','gate','tank','other')),
     name       text,
     geom       geometry(Point, 4326),
+    color      text,
     notes      text,
     created_at timestamptz NOT NULL DEFAULT now()
 );

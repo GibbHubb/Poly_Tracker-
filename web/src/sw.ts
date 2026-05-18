@@ -10,10 +10,13 @@ declare let self: ServiceWorkerGlobalScope;
 // App shell — injected by vite-plugin-pwa (injectManifest strategy).
 precacheAndRoute(self.__WB_MANIFEST);
 
-// Mapbox raster tiles: serve from cache, refresh in the background.
-// Approx. "last 100 tiles per zoom level" across ~22 zoom levels.
+// Satellite raster tiles (Mapbox or Esri — user-switchable): serve from
+// cache, refresh in background. ~100 tiles per zoom across ~22 levels.
 registerRoute(
-  ({ url }) => url.hostname === 'api.mapbox.com' && url.pathname.includes('/tiles/'),
+  ({ url }) =>
+    (url.hostname === 'api.mapbox.com' && url.pathname.startsWith('/v4/')) ||
+    (url.hostname.endsWith('arcgisonline.com') &&
+      url.pathname.includes('/MapServer/tile/')),
   new StaleWhileRevalidate({
     cacheName: 'mapbox-tiles',
     plugins: [

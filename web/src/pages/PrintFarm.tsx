@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import maplibregl from 'maplibre-gl';
+import type { FeatureCollection, Geometry } from 'geojson';
 import {
   api,
   type Farm,
@@ -9,6 +10,24 @@ import {
 import { FEATURE_COLORS, satelliteStyle } from '../lib/mapStyle';
 
 const EMPTY: GeoJsonFeatureCollection = { type: 'FeatureCollection', features: [] };
+
+/**
+ * Narrow our loose API collection (geometry may be null) to a strict GeoJSON
+ * FeatureCollection for MapLibre sources. Null-geometry rows can't render, so
+ * they're dropped. Runtime shape is already valid GeoJSON (from ST_AsGeoJSON).
+ */
+function toSource(fc: GeoJsonFeatureCollection): FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: fc.features
+      .filter((f) => f.geometry !== null)
+      .map((f) => ({
+        type: 'Feature',
+        geometry: f.geometry as Geometry,
+        properties: f.properties,
+      })),
+  };
+}
 
 /**
  * Print-only route consumed by Puppeteer. No app chrome. Once the map fires
@@ -47,8 +66,12 @@ export function PrintFarm() {
       center: [134, -25.5],
       zoom: 3.5,
       interactive: false,
-      attributionControl: { compact: false },
+      attributionControl: false,
     });
+    map.addControl(
+      new maplibregl.AttributionControl({ compact: false }),
+      'bottom-right',
+    );
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
     map.on('load', () => {
@@ -58,7 +81,7 @@ export function PrintFarm() {
         ...features.features,
       ];
 
-      map.addSource('paddocks', { type: 'geojson', data: paddocks });
+      map.addSource('paddocks', { type: 'geojson', data: toSource(paddocks) });
       map.addLayer({
         id: 'paddocks-fill',
         type: 'fill',
@@ -72,7 +95,7 @@ export function PrintFarm() {
         paint: { 'line-color': '#0891b2', 'line-width': 4 },
       });
 
-      map.addSource('poly', { type: 'geojson', data: polyRuns });
+      map.addSource('poly', { type: 'geojson', data: toSource(polyRuns) });
       map.addLayer({
         id: 'poly-line',
         type: 'line',
@@ -80,7 +103,7 @@ export function PrintFarm() {
         paint: { 'line-color': '#f97316', 'line-width': 5 },
       });
 
-      map.addSource('pts', { type: 'geojson', data: features });
+      map.addSource('pts', { type: 'geojson', data: toSource(features) });
       map.addLayer({
         id: 'pts-circle',
         type: 'circle',

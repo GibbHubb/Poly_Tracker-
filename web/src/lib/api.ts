@@ -74,5 +74,28 @@ export const api = {
       body: JSON.stringify(f),
     }),
 
+  updatePaddock: (farmId: string, id: string, f: Partial<GeoJsonFeature>) =>
+    request<GeoJsonFeature>(`/farms/${farmId}/paddocks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(f),
+    }),
+  updatePolyRun: (farmId: string, id: string, f: Partial<GeoJsonFeature>) =>
+    request<GeoJsonFeature>(`/farms/${farmId}/poly-runs/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(f),
+    }),
+  updateFeature: (farmId: string, id: string, f: Partial<GeoJsonFeature>) =>
+    request<GeoJsonFeature>(`/farms/${farmId}/features/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(f),
+    }),
+
+  deletePaddock: (farmId: string, id: string) =>
+    request<void>(`/farms/${farmId}/paddocks/${id}`, { method: 'DELETE' }),
+  deletePolyRun: (farmId: string, id: string) =>
+    request<void>(`/farms/${farmId}/poly-runs/${id}`, { method: 'DELETE' }),
+  deleteFeature: (farmId: string, id: string) =>
+    request<void>(`/farms/${farmId}/features/${id}`, { method: 'DELETE' }),
+
   exportPdfUrl: (farmId: string) => `${BASE}/farms/${farmId}/export-pdf`,
 };

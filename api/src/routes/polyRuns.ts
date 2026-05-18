@@ -14,6 +14,7 @@ const props = z
     depth_m: z.number().positive().nullish(),
     material: z.string().nullish(),
     installed_date: z.string().nullish(), // ISO date string
+    color: z.string().nullish(),
     notes: z.string().nullish(),
   })
   .passthrough();
@@ -32,13 +33,14 @@ interface GeoRow {
   depth_m: string | null;
   material: string | null;
   installed_date: string | null;
+  color: string | null;
   notes: string | null;
   created_at: string;
 }
 
 const SELECT = `
-  SELECT id, name, diameter_mm, depth_m, material, installed_date, notes,
-         created_at, ST_AsGeoJSON(geom) AS geojson
+  SELECT id, name, diameter_mm, depth_m, material, installed_date, color,
+         notes, created_at, ST_AsGeoJSON(geom) AS geojson
     FROM poly_runs WHERE farm_id = $1`;
 
 polyRunsRouter.get(
@@ -58,10 +60,11 @@ polyRunsRouter.post(
     const p = body.properties;
     const { rows } = await query<GeoRow>(
       `INSERT INTO poly_runs
-         (farm_id, name, diameter_mm, depth_m, material, installed_date, notes, geom)
-       VALUES ($1,$2,$3,$4,$5,$6,$7, ST_SetSRID(ST_GeomFromGeoJSON($8), 4326))
-       RETURNING id, name, diameter_mm, depth_m, material, installed_date, notes,
-                 created_at, ST_AsGeoJSON(geom) AS geojson`,
+         (farm_id, name, diameter_mm, depth_m, material, installed_date,
+          color, notes, geom)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, ST_SetSRID(ST_GeomFromGeoJSON($9), 4326))
+       RETURNING id, name, diameter_mm, depth_m, material, installed_date,
+                 color, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.farmId,
         p.name,
@@ -69,6 +72,7 @@ polyRunsRouter.post(
         p.depth_m ?? null,
         p.material ?? null,
         p.installed_date ?? null,
+        p.color ?? null,
         p.notes ?? null,
         JSON.stringify(body.geometry),
       ],
@@ -89,11 +93,12 @@ polyRunsRouter.patch(
          depth_m = COALESCE($5, depth_m),
          material = COALESCE($6, material),
          installed_date = COALESCE($7, installed_date),
-         notes = COALESCE($8, notes),
-         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($9), 4326), geom)
+         color = COALESCE($8, color),
+         notes = COALESCE($9, notes),
+         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($10), 4326), geom)
        WHERE id = $1 AND farm_id = $2
-       RETURNING id, name, diameter_mm, depth_m, material, installed_date, notes,
-                 created_at, ST_AsGeoJSON(geom) AS geojson`,
+       RETURNING id, name, diameter_mm, depth_m, material, installed_date,
+                 color, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.runId,
         req.params.farmId,
@@ -102,6 +107,7 @@ polyRunsRouter.patch(
         p.depth_m ?? null,
         p.material ?? null,
         p.installed_date ?? null,
+        p.color ?? null,
         p.notes ?? null,
         body.geometry ? JSON.stringify(body.geometry) : null,
       ],

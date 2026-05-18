@@ -1,4 +1,3 @@
-import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { registerSW } from 'virtual:pwa-register';
@@ -12,10 +11,13 @@ registerSW({ immediate: true });
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root not found');
 
+// NOTE: React.StrictMode intentionally omitted. Its dev-only double-invoke
+// of effects creates → destroys → recreates the MapLibre map in quick
+// succession, which makes Firefox drop the WebGL context ("WebGL context
+// was lost") and leaves mapbox-gl-draw bound to a dead canvas. StrictMode
+// has no effect on production builds, so this is a dev-correctness fix only.
 ReactDOM.createRoot(rootEl).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </React.StrictMode>,
+  <BrowserRouter>
+    <App />
+  </BrowserRouter>,
 );

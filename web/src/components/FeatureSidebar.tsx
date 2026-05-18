@@ -1,44 +1,101 @@
-import type { GeoJsonFeatureCollection } from '../lib/api';
-import { FEATURE_COLORS } from '../lib/mapStyle';
+import type { GeoJsonFeature, GeoJsonFeatureCollection } from '../lib/api';
+import { FEATURE_COLORS, PALETTE } from '../lib/mapStyle';
+import type { DrawKind, PointType } from './FeatureDialog';
+
+export interface SidebarSelection {
+  kind: DrawKind;
+  id: string;
+  geometry: GeoJsonFeature['geometry'];
+  name: string;
+  color: string;
+  type: PointType;
+}
 
 interface Props {
   paddocks: GeoJsonFeatureCollection;
   polyRuns: GeoJsonFeatureCollection;
   features: GeoJsonFeatureCollection;
+  onSelect: (sel: SidebarSelection) => void;
 }
 
-export function FeatureSidebar({ paddocks, polyRuns, features }: Props) {
+const DEFAULT_COLOR: Record<DrawKind, string> = {
+  paddock: '#22d3ee',
+  polyRun: '#f97316',
+  feature: '#38bdf8',
+};
+
+function selectionOf(
+  kind: DrawKind,
+  f: GeoJsonFeature,
+): SidebarSelection {
+  const p = f.properties;
+  const type = (p.type as PointType) ?? 'other';
+  return {
+    kind,
+    id: String(f.id),
+    geometry: f.geometry,
+    name: String(p.name ?? ''),
+    color:
+      typeof p.color === 'string' && p.color
+        ? p.color
+        : kind === 'feature'
+          ? (FEATURE_COLORS[type] ?? PALETTE[0]!.value)
+          : DEFAULT_COLOR[kind],
+    type,
+  };
+}
+
+export function FeatureSidebar({
+  paddocks,
+  polyRuns,
+  features,
+  onSelect,
+}: Props) {
   return (
     <aside className="w-72 shrink-0 overflow-y-auto border-l border-slate-800 bg-slate-900 p-4 text-sm">
       <Section title={`Paddocks (${paddocks.features.length})`}>
-        {paddocks.features.map((f) => (
-          <Row key={f.id} label={String(f.properties.name ?? 'Unnamed')} />
-        ))}
+        {paddocks.features.map((f) => {
+          const s = selectionOf('paddock', f);
+          return (
+            <Row
+              key={f.id}
+              label={s.name || 'Unnamed'}
+              color={s.color}
+              onClick={() => onSelect(s)}
+            />
+          );
+        })}
       </Section>
 
       <Section title={`Poly runs (${polyRuns.features.length})`}>
-        {polyRuns.features.map((f) => (
-          <Row
-            key={f.id}
-            label={String(f.properties.name ?? 'Unnamed')}
-            meta={
-              f.properties.diameter_mm
-                ? `${String(f.properties.diameter_mm)} mm`
-                : undefined
-            }
-          />
-        ))}
+        {polyRuns.features.map((f) => {
+          const s = selectionOf('polyRun', f);
+          return (
+            <Row
+              key={f.id}
+              label={s.name || 'Unnamed'}
+              color={s.color}
+              meta={
+                f.properties.diameter_mm
+                  ? `${String(f.properties.diameter_mm)} mm`
+                  : undefined
+              }
+              onClick={() => onSelect(s)}
+            />
+          );
+        })}
       </Section>
 
       <Section title={`Points (${features.features.length})`}>
         {features.features.map((f) => {
-          const type = String(f.properties.type ?? 'other');
+          const s = selectionOf('feature', f);
           return (
             <Row
               key={f.id}
-              label={String(f.properties.name ?? type)}
-              color={FEATURE_COLORS[type]}
-              meta={type}
+              label={s.name || s.type}
+              color={s.color}
+              meta={s.type}
+              onClick={() => onSelect(s)}
             />
           );
         })}
@@ -66,19 +123,26 @@ function Row({
   label,
   meta,
   color,
+  onClick,
 }: {
   label: string;
   meta?: string;
   color?: string;
+  onClick: () => void;
 }) {
   return (
-    <li className="flex items-center gap-2 rounded px-2 py-1 hover:bg-slate-800">
-      <span
-        className="h-2.5 w-2.5 rounded-full"
-        style={{ backgroundColor: color ?? '#64748b' }}
-      />
-      <span className="flex-1 truncate">{label}</span>
-      {meta && <span className="text-xs text-slate-500">{meta}</span>}
+    <li>
+      <button
+        onClick={onClick}
+        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-slate-800"
+      >
+        <span
+          className="h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{ backgroundColor: color ?? '#64748b' }}
+        />
+        <span className="flex-1 truncate">{label}</span>
+        {meta && <span className="text-xs text-slate-500">{meta}</span>}
+      </button>
     </li>
   );
 }

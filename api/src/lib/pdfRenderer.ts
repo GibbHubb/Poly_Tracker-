@@ -17,7 +17,8 @@ export async function renderFarmPdf({ printUrl }: PdfOptions): Promise<Buffer> {
   });
   try {
     const page = await browser.newPage();
-    await page.setViewport({ ...A3_LANDSCAPE_PX, deviceScaleFactor: 2 });
+    // 3x device scale ≈ ~450dpi at A3 — crisp imagery/labels for print docs.
+    await page.setViewport({ ...A3_LANDSCAPE_PX, deviceScaleFactor: 3 });
     await page.goto(printUrl, { waitUntil: 'networkidle0', timeout: 60_000 });
 
     // The print route flips data-map-ready to "1" on the MapLibre idle event.

@@ -3,7 +3,6 @@ import { Link, Route, Routes } from 'react-router-dom';
 import { FarmList } from './pages/FarmList';
 import { FarmMap } from './pages/FarmMap';
 import { Settings } from './pages/Settings';
-import { PrintFarm } from './pages/PrintFarm';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { startAutoSync } from './lib/sync';
 
@@ -26,8 +25,6 @@ export default function App() {
 
   return (
     <Routes>
-      {/* Print route is chrome-free — Puppeteer renders this for PDF export. */}
-      <Route path="/print/:farmId" element={<PrintFarm />} />
       <Route
         path="*"
         element={

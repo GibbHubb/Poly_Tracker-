@@ -96,6 +96,4 @@ export const api = {
     request<void>(`/farms/${farmId}/poly-runs/${id}`, { method: 'DELETE' }),
   deleteFeature: (farmId: string, id: string) =>
     request<void>(`/farms/${farmId}/features/${id}`, { method: 'DELETE' }),
-
-  exportPdfUrl: (farmId: string) => `${BASE}/farms/${farmId}/export-pdf`,
 };

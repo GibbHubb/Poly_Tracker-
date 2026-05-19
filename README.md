@@ -74,11 +74,10 @@ api `:3001`, db `:5432`.
 
 ## PDF export
 
-`POST /api/farms/:id/export-pdf` launches headless Chromium in the api
-container, loads the chrome-free `/print/:farmId` route, waits for the
-MapLibre idle event (`data-map-ready="1"`), and returns an A3-landscape PDF
-at 2× device pixel ratio with header, legend, scale bar, north arrow, and a
-feature table.
+Fully client-side (jsPDF) — the **Export PDF** button captures the live
+MapLibre canvas exactly as shown (current centre/zoom/basemap + all rendered
+features) and builds an A3-landscape PDF with a header and a grouped feature
+list. No server/Puppeteer; the export always matches the on-screen view.
 
 ## Offline
 

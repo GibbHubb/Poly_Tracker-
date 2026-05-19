@@ -32,6 +32,17 @@ export interface GeoJsonFeatureCollection<
   features: GeoJsonFeature<P>[];
 }
 
+export interface Photo {
+  id: string;
+  feature_type: string | null;
+  feature_id: string | null;
+  path: string;
+  taken_at: string | null;
+  // PostGIS numeric columns serialise as strings.
+  lat: string | null;
+  lng: string | null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -96,4 +107,11 @@ export const api = {
     request<void>(`/farms/${farmId}/poly-runs/${id}`, { method: 'DELETE' }),
   deleteFeature: (farmId: string, id: string) =>
     request<void>(`/farms/${farmId}/features/${id}`, { method: 'DELETE' }),
+
+  listPhotos: (featureId?: string) =>
+    request<Photo[]>(
+      featureId ? `/photos?feature_id=${featureId}` : '/photos',
+    ),
+  /** Absolute URL the api serves the stored image bytes from. */
+  photoFileUrl: (id: string) => `${BASE}/photos/file/${id}`,
 };

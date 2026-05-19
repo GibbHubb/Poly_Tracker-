@@ -34,6 +34,14 @@ export async function replayQueue(): Promise<SyncResult> {
         } else if (res.status === 409 || res.status === 412) {
           console.warn('[sync] server-wins conflict, dropping', m.id);
           conflicts.push(m);
+          await db.conflicts.put({
+            id: m.id,
+            op: m.op,
+            endpoint: m.endpoint,
+            method: m.method,
+            status: res.status,
+            resolvedAt: Date.now(),
+          });
           await db.pending.delete(m.id);
         } else {
           // 4xx/5xx that isn't a conflict — stop and retry later.

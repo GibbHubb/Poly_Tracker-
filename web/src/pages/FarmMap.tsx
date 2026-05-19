@@ -26,12 +26,33 @@ import { exportFarmPdf } from '../lib/exportPdf';
 
 const EMPTY: GeoJsonFeatureCollection = { type: 'FeatureCollection', features: [] };
 
+/** Build the GeoJSON properties payload for a given kind from the dialog. */
+function propsFor(
+  kind: DrawKind,
+  r: FeatureDialogResult,
+): Record<string, unknown> {
+  const p: Record<string, unknown> = {
+    name: r.name,
+    color: r.color,
+    notes: r.notes,
+  };
+  if (kind === 'feature') p.type = r.type;
+  if (kind === 'polyRun') {
+    p.diameter_mm = r.diameter_mm;
+    p.depth_m = r.depth_m;
+    p.material = r.material;
+    p.installed_date = r.installed_date;
+  }
+  return p;
+}
+
 export function FarmMap() {
   const { farmId = '' } = useParams();
   const [farm, setFarm] = useState<Farm | null>(null);
   const [paddocks, setPaddocks] = useState(EMPTY);
   const [polyRuns, setPolyRuns] = useState(EMPTY);
   const [features, setFeatures] = useState(EMPTY);
+  const [photos, setPhotos] = useState(EMPTY);
   const mapRef = useRef<MapLibreMap | null>(null);
   // Geometry awaiting name/colour from the dialog.
   const [pending, setPending] = useState<{
@@ -55,9 +76,43 @@ export function FarmMap() {
     setFeatures(ft);
   }, [farmId]);
 
+  // Geotagged photos → Point features (precompute the file URL so MapView
+  // stays API-agnostic). The photos API isn't farm-scoped, so this lists all
+  // photos with a fix — acceptable for v1 (photos carry no farm linkage).
+  const reloadPhotos = useCallback(async () => {
+    const rows = await api.listPhotos();
+    setPhotos({
+      type: 'FeatureCollection',
+      features: rows
+        .filter(
+          (p) =>
+            p.lat != null &&
+            p.lng != null &&
+            p.lat !== '' &&
+            p.lng !== '' &&
+            Number.isFinite(Number(p.lat)) &&
+            Number.isFinite(Number(p.lng)),
+        )
+        .map((p) => ({
+          type: 'Feature',
+          id: p.id,
+          geometry: {
+            type: 'Point',
+            coordinates: [Number(p.lng), Number(p.lat)],
+          },
+          properties: {
+            id: p.id,
+            url: api.photoFileUrl(p.id),
+            taken_at: p.taken_at,
+          },
+        })),
+    });
+  }, []);
+
   useEffect(() => {
     void reload().catch(() => undefined);
-  }, [reload]);
+    void reloadPhotos().catch(() => undefined);
+  }, [reload, reloadPhotos]);
 
   // Geometry type decides the collection: Polygon→paddock, Line→poly run,
   // Point→generic feature. The drawn shape opens the name/colour dialog.
@@ -79,10 +134,7 @@ export function FarmMap() {
       const base: GeoJsonFeature = {
         type: 'Feature',
         geometry,
-        properties:
-          kind === 'feature'
-            ? { name: r.name, color: r.color, type: r.type }
-            : { name: r.name, color: r.color },
+        properties: propsFor(kind, r),
       };
 
       try {
@@ -148,10 +200,7 @@ export function FarmMap() {
       setEditing(null);
 
       const patch: Partial<GeoJsonFeature> = {
-        properties:
-          kind === 'feature'
-            ? { name: r.name, color: r.color, type: r.type }
-            : { name: r.name, color: r.color },
+        properties: propsFor(kind, r),
       };
 
       try {
@@ -219,6 +268,7 @@ export function FarmMap() {
           paddocks={paddocks}
           polyRuns={polyRuns}
           features={features}
+          photos={photos}
           onCreate={handleCreate}
           onReady={(m) => {
             mapRef.current = m;
@@ -238,9 +288,18 @@ export function FarmMap() {
                   name: editing.name,
                   color: editing.color,
                   type: editing.type,
+                  notes: editing.notes,
+                  diameter_mm: editing.diameter_mm,
+                  depth_m: editing.depth_m,
+                  material: editing.material,
+                  installed_date: editing.installed_date,
                 }
               : undefined
           }
+          featureId={editing?.id}
+          onPhotoUploaded={() => {
+            void reloadPhotos();
+          }}
           onCancel={() => setEditing(null)}
           onSubmit={handleEditSubmit}
           onDelete={handleEditDelete}

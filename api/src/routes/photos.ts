@@ -54,6 +54,19 @@ photosRouter.get(
   }),
 );
 
+photosRouter.get(
+  '/file/:id',
+  asyncHandler(async (req, res) => {
+    const { rows } = await query<{ path: string }>(
+      'SELECT path FROM photos WHERE id = $1',
+      [req.params.id],
+    );
+    const row = rows[0];
+    if (!row) throw new HttpError(404, 'Photo not found');
+    res.sendFile(row.path);
+  }),
+);
+
 photosRouter.post(
   '/',
   upload.single('photo'),

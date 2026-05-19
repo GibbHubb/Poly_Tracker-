@@ -17,6 +17,8 @@ interface MapViewProps {
   paddocks: GeoJsonFeatureCollection;
   polyRuns: GeoJsonFeatureCollection;
   features: GeoJsonFeatureCollection;
+  /** Geotagged photos as Point features; properties carry `url` (file link). */
+  photos: GeoJsonFeatureCollection;
   onCreate?: (feature: GeoJsonFeature) => void;
   onReady?: (map: maplibregl.Map) => void;
 }
@@ -34,6 +36,7 @@ export function MapView({
   paddocks,
   polyRuns,
   features,
+  photos,
   onCreate,
   onReady,
 }: MapViewProps) {
@@ -112,6 +115,7 @@ export function MapView({
       map.addSource('saved-paddocks', { type: 'geojson', data: EMPTY });
       map.addSource('saved-polyruns', { type: 'geojson', data: EMPTY });
       map.addSource('saved-features', { type: 'geojson', data: EMPTY });
+      map.addSource('saved-photos', { type: 'geojson', data: EMPTY });
 
       map.addLayer({
         id: 'saved-paddocks-fill',
@@ -151,6 +155,29 @@ export function MapView({
           'circle-stroke-color': '#0f172a',
           'circle-stroke-width': 2,
         },
+      });
+      // Geotagged photos — distinct amber marker, clickable to open the image.
+      map.addLayer({
+        id: 'saved-photos-circle',
+        type: 'circle',
+        source: 'saved-photos',
+        paint: {
+          'circle-radius': 7,
+          'circle-color': '#fbbf24',
+          'circle-stroke-color': '#1e293b',
+          'circle-stroke-width': 2,
+        },
+      });
+      const openPhoto = (e: maplibregl.MapLayerMouseEvent) => {
+        const url = e.features?.[0]?.properties?.url as string | undefined;
+        if (url) window.open(url, '_blank', 'noopener');
+      };
+      map.on('click', 'saved-photos-circle', openPhoto);
+      map.on('mouseenter', 'saved-photos-circle', () => {
+        map.getCanvas().style.cursor = 'pointer';
+      });
+      map.on('mouseleave', 'saved-photos-circle', () => {
+        map.getCanvas().style.cursor = '';
       });
 
       // MapboxDraw targets mapbox-gl typings; MapLibre is API-compatible.
@@ -203,7 +230,10 @@ export function MapView({
     (map.getSource('saved-features') as maplibregl.GeoJSONSource)?.setData(
       toSource(features),
     );
-  }, [ready, paddocks, polyRuns, features]);
+    (map.getSource('saved-photos') as maplibregl.GeoJSONSource)?.setData(
+      toSource(photos),
+    );
+  }, [ready, paddocks, polyRuns, features, photos]);
 
   // Reflect LayerToggle visibility.
   useEffect(() => {

@@ -18,15 +18,31 @@ export interface CachedFarm {
   created_at: string;
 }
 
+/** A mutation the server rejected as a conflict during replay (server-wins). */
+export interface ConflictRecord {
+  id: string; // original mutation id
+  op: MutationOp;
+  endpoint: string;
+  method: 'POST' | 'PATCH' | 'DELETE';
+  status: number;
+  resolvedAt: number;
+}
+
 class PolyTrackerDB extends Dexie {
   pending!: Table<PendingMutation, string>;
   farms!: Table<CachedFarm, string>;
+  conflicts!: Table<ConflictRecord, string>;
 
   constructor() {
     super('poly_tracker');
     this.version(1).stores({
       pending: 'id, createdAt',
       farms: 'id',
+    });
+    this.version(2).stores({
+      pending: 'id, createdAt',
+      farms: 'id',
+      conflicts: 'id, resolvedAt',
     });
   }
 }

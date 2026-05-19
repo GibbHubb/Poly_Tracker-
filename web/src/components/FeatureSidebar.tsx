@@ -9,6 +9,11 @@ export interface SidebarSelection {
   name: string;
   color: string;
   type: PointType;
+  notes: string | null;
+  diameter_mm: number | null;
+  depth_m: number | null;
+  material: string | null;
+  installed_date: string | null;
 }
 
 interface Props {
@@ -30,6 +35,12 @@ function selectionOf(
 ): SidebarSelection {
   const p = f.properties;
   const type = (p.type as PointType) ?? 'other';
+  const numOrNull = (v: unknown): number | null => {
+    const n = Number(v);
+    return v != null && v !== '' && Number.isFinite(n) ? n : null;
+  };
+  const strOrNull = (v: unknown): string | null =>
+    typeof v === 'string' && v.trim() !== '' ? v : null;
   return {
     kind,
     id: String(f.id),
@@ -42,6 +53,12 @@ function selectionOf(
           ? (FEATURE_COLORS[type] ?? PALETTE[0]!.value)
           : DEFAULT_COLOR[kind],
     type,
+    notes: strOrNull(p.notes),
+    diameter_mm: numOrNull(p.diameter_mm),
+    depth_m: numOrNull(p.depth_m),
+    material: strOrNull(p.material),
+    // date input wants yyyy-mm-dd; trim any time component
+    installed_date: strOrNull(p.installed_date)?.slice(0, 10) ?? null,
   };
 }
 

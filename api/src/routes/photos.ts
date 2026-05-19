@@ -44,12 +44,25 @@ photosRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const featureId = req.query.feature_id;
-    const { rows } = await query<PhotoRow>(
-      featureId
-        ? 'SELECT * FROM photos WHERE feature_id = $1 ORDER BY taken_at'
-        : 'SELECT * FROM photos ORDER BY taken_at',
-      featureId ? [featureId] : [],
-    );
+    const farmId = req.query.farm_id;
+    let sql: string;
+    let params: unknown[];
+    if (featureId) {
+      sql = 'SELECT * FROM photos WHERE feature_id = $1 ORDER BY taken_at';
+      params = [featureId];
+    } else if (farmId) {
+      // Photos only attach to point features; scope to a farm by joining
+      // features → farm_id (no farm_id column on photos by design).
+      sql = `SELECT p.* FROM photos p
+               JOIN features f ON p.feature_id = f.id
+              WHERE f.farm_id = $1
+              ORDER BY p.taken_at`;
+      params = [farmId];
+    } else {
+      sql = 'SELECT * FROM photos ORDER BY taken_at';
+      params = [];
+    }
+    const { rows } = await query<PhotoRow>(sql, params);
     res.json(rows);
   }),
 );

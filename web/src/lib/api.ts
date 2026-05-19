@@ -108,10 +108,14 @@ export const api = {
   deleteFeature: (farmId: string, id: string) =>
     request<void>(`/farms/${farmId}/features/${id}`, { method: 'DELETE' }),
 
-  listPhotos: (featureId?: string) =>
-    request<Photo[]>(
-      featureId ? `/photos?feature_id=${featureId}` : '/photos',
-    ),
+  listPhotos: (opts?: { featureId?: string; farmId?: string }) => {
+    const qs = opts?.featureId
+      ? `?feature_id=${opts.featureId}`
+      : opts?.farmId
+        ? `?farm_id=${opts.farmId}`
+        : '';
+    return request<Photo[]>(`/photos${qs}`);
+  },
   /** Absolute URL the api serves the stored image bytes from. */
   photoFileUrl: (id: string) => `${BASE}/photos/file/${id}`,
 };

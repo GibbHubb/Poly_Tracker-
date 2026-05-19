@@ -78,9 +78,9 @@ export function FarmMap() {
 
   // Geotagged photos → Point features (precompute the file URL so MapView
   // stays API-agnostic). The photos API isn't farm-scoped, so this lists all
-  // photos with a fix — acceptable for v1 (photos carry no farm linkage).
+  // photos with a fix for THIS farm (scoped server-side via features join).
   const reloadPhotos = useCallback(async () => {
-    const rows = await api.listPhotos();
+    const rows = await api.listPhotos({ farmId });
     setPhotos({
       type: 'FeatureCollection',
       features: rows
@@ -107,7 +107,7 @@ export function FarmMap() {
           },
         })),
     });
-  }, []);
+  }, [farmId]);
 
   useEffect(() => {
     void reload().catch(() => undefined);

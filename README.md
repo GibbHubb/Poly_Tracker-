@@ -50,6 +50,16 @@ docker compose up --build
 
 Then open **<http://localhost:8080>** (nginx single-origin entrypoint).
 
+### Dev vs prod
+
+- **Dev** (above): `docker compose up --build` — Vite dev server with HMR
+  behind nginx, source bind-mounted.
+- **Prod**: `docker compose -f docker-compose.prod.yml up --build` — a
+  self-contained stack that serves the **built** PWA (the `web` image's
+  `prod` nginx stage) at <http://localhost:8080>, `/api` proxied, SPA
+  deep-link fallback, service worker active. Pass `MAPBOX_TOKEN` in the
+  environment to bake the Mapbox basemap (Esri works without it).
+
 - The web app shows an empty farm list with a **Create farm** button.
 - Create a farm, click it → a satellite map centred on Australia opens with
   the draw toolbar (point / line / polygon / trash) on the top-left.

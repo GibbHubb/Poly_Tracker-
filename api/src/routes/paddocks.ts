@@ -67,10 +67,11 @@ paddocksRouter.patch(
   asyncHandler(async (req, res) => {
     const body = featureInput.partial({ geometry: true }).parse(req.body);
     const { rows } = await query<GeoRow>(
+      // Full-replace owned attributes (see features.ts); geometry COALESCE.
       `UPDATE paddocks SET
-         name = COALESCE($3, name),
-         color = COALESCE($4, color),
-         notes = COALESCE($5, notes),
+         name = $3,
+         color = $4,
+         notes = $5,
          geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($6), 4326), geom)
        WHERE id = $1 AND farm_id = $2
        RETURNING id, name, color, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,

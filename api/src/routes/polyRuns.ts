@@ -87,14 +87,15 @@ polyRunsRouter.patch(
     const body = featureInput.partial({ geometry: true }).parse(req.body);
     const p = body.properties ?? {};
     const { rows } = await query<GeoRow>(
+      // Full-replace owned attributes (see features.ts); geometry COALESCE.
       `UPDATE poly_runs SET
-         name = COALESCE($3, name),
-         diameter_mm = COALESCE($4, diameter_mm),
-         depth_m = COALESCE($5, depth_m),
-         material = COALESCE($6, material),
-         installed_date = COALESCE($7, installed_date),
-         color = COALESCE($8, color),
-         notes = COALESCE($9, notes),
+         name = $3,
+         diameter_mm = $4,
+         depth_m = $5,
+         material = $6,
+         installed_date = $7,
+         color = $8,
+         notes = $9,
          geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($10), 4326), geom)
        WHERE id = $1 AND farm_id = $2
        RETURNING id, name, diameter_mm, depth_m, material, installed_date,

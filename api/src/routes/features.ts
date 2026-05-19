@@ -81,11 +81,14 @@ featuresRouter.patch(
     const body = featureInput.partial({ geometry: true }).parse(req.body);
     const p = body.properties ?? {};
     const { rows } = await query<GeoRow>(
+      // Full-replace owned attributes (client always submits the complete
+      // set) so emptying a field clears it; geometry stays COALESCE since
+      // attribute-only edits omit it.
       `UPDATE features SET
-         type = COALESCE($3, type),
-         name = COALESCE($4, name),
-         color = COALESCE($5, color),
-         notes = COALESCE($6, notes),
+         type = $3,
+         name = $4,
+         color = $5,
+         notes = $6,
          geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($7), 4326), geom)
        WHERE id = $1 AND farm_id = $2
        RETURNING id, type, name, color, notes, created_at,

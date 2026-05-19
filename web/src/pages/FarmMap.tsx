@@ -54,6 +54,9 @@ export function FarmMap() {
   const [features, setFeatures] = useState(EMPTY);
   const [photos, setPhotos] = useState(EMPTY);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  // One-shot: fit the map to the farm's saved geometry on first load.
+  const didFitRef = useRef(false);
   // Geometry awaiting name/colour from the dialog.
   const [pending, setPending] = useState<{
     kind: DrawKind;
@@ -113,6 +116,42 @@ export function FarmMap() {
     void reload().catch(() => undefined);
     void reloadPhotos().catch(() => undefined);
   }, [reload, reloadPhotos]);
+
+  // Once the map is ready and the farm's geometry has loaded, fit the view
+  // to it (one-shot — don't fight the user's later pan/zoom).
+  useEffect(() => {
+    if (!mapReady || didFitRef.current) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const coords = [
+      ...paddocks.features,
+      ...polyRuns.features,
+      ...features.features,
+    ].flatMap((f) => geometryCoords(f.geometry));
+    if (coords.length === 0) return;
+    let w = 180,
+      s = 90,
+      e = -180,
+      n = -90;
+    for (const [lng, lat] of coords) {
+      w = Math.min(w, lng);
+      e = Math.max(e, lng);
+      s = Math.min(s, lat);
+      n = Math.max(n, lat);
+    }
+    didFitRef.current = true;
+    if (w === e && s === n) {
+      map.flyTo({ center: [w, s], zoom: 16 });
+    } else {
+      map.fitBounds(
+        [
+          [w, s],
+          [e, n],
+        ],
+        { padding: 80, maxZoom: 17, duration: 600 },
+      );
+    }
+  }, [mapReady, paddocks, polyRuns, features]);
 
   // Geometry type decides the collection: Polygon→paddock, Line→poly run,
   // Point→generic feature. The drawn shape opens the name/colour dialog.
@@ -272,6 +311,7 @@ export function FarmMap() {
           onCreate={handleCreate}
           onReady={(m) => {
             mapRef.current = m;
+            setMapReady(true);
           }}
         />
         <FeatureDialog

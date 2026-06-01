@@ -55,7 +55,7 @@ const EDIT_TITLES: Record<DrawKind, string> = {
   feature: 'Edit point',
 };
 
-const POINT_TYPES: PointType[] = [
+export const POINT_TYPES: PointType[] = [
   'trough',
   'turkey_nest',
   'bore',

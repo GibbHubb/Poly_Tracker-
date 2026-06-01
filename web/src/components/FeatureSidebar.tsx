@@ -1,7 +1,8 @@
+import { useMemo, useState } from 'react';
 import type { GeoJsonFeature, GeoJsonFeatureCollection } from '../lib/api';
 import { FEATURE_COLORS, PALETTE } from '../lib/mapStyle';
 import { formatArea, formatLength } from '../lib/units';
-import type { DrawKind, PointType } from './FeatureDialog';
+import { POINT_TYPES, type DrawKind, type PointType } from './FeatureDialog';
 
 export interface SidebarSelection {
   kind: DrawKind;
@@ -68,65 +69,184 @@ function selectionOf(
   };
 }
 
+/** Text a row displays — also what the search box matches against. */
+function displayLabel(kind: DrawKind, f: GeoJsonFeature): string {
+  const p = f.properties;
+  const name = String(p.name ?? '');
+  if (kind === 'feature') return name || String(p.type ?? 'other');
+  return name || 'Unnamed';
+}
+
 export function FeatureSidebar({
   paddocks,
   polyRuns,
   features,
   onSelect,
 }: Props) {
+  const [search, setSearch] = useState('');
+  const [activeTypes, setActiveTypes] = useState<Set<PointType>>(new Set());
+
+  const q = search.trim().toLowerCase();
+
+  const visiblePaddocks = useMemo(
+    () =>
+      paddocks.features.filter(
+        (f) => q === '' || displayLabel('paddock', f).toLowerCase().includes(q),
+      ),
+    [paddocks, q],
+  );
+  const visiblePolyRuns = useMemo(
+    () =>
+      polyRuns.features.filter(
+        (f) => q === '' || displayLabel('polyRun', f).toLowerCase().includes(q),
+      ),
+    [polyRuns, q],
+  );
+  const visiblePoints = useMemo(
+    () =>
+      features.features.filter((f) => {
+        const textOk =
+          q === '' || displayLabel('feature', f).toLowerCase().includes(q);
+        const typeOk =
+          activeTypes.size === 0 ||
+          activeTypes.has((f.properties.type as PointType) ?? 'other');
+        return textOk && typeOk;
+      }),
+    [features, q, activeTypes],
+  );
+
+  const toggleType = (t: PointType) =>
+    setActiveTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
+      return next;
+    });
+
+  const allEmpty =
+    visiblePaddocks.length === 0 &&
+    visiblePolyRuns.length === 0 &&
+    visiblePoints.length === 0;
+
   return (
     <aside className="w-72 shrink-0 overflow-y-auto border-l border-slate-800 bg-slate-900 p-4 text-sm">
-      <Section title={`Paddocks (${paddocks.features.length})`}>
-        {paddocks.features.map((f) => {
-          const s = selectionOf('paddock', f);
-          return (
-            <Row
-              key={f.id}
-              label={s.name || 'Unnamed'}
-              color={s.color}
-              meta={formatArea(s.area_m2) || undefined}
-              onClick={() => onSelect(s)}
-            />
-          );
-        })}
-      </Section>
+      <SearchBar value={search} onChange={setSearch} />
+      <TypeChips active={activeTypes} onToggle={toggleType} />
 
-      <Section title={`Poly runs (${polyRuns.features.length})`}>
-        {polyRuns.features.map((f) => {
-          const s = selectionOf('polyRun', f);
-          const meta = [
-            formatLength(s.length_m),
-            s.diameter_mm ? `${String(s.diameter_mm)} mm` : '',
-          ]
-            .filter(Boolean)
-            .join(' · ');
-          return (
-            <Row
-              key={f.id}
-              label={s.name || 'Unnamed'}
-              color={s.color}
-              meta={meta || undefined}
-              onClick={() => onSelect(s)}
-            />
-          );
-        })}
-      </Section>
+      {allEmpty ? (
+        <p className="mt-4 text-slate-500">No features match your filters.</p>
+      ) : (
+        <>
+          <Section title={`Paddocks (${visiblePaddocks.length})`}>
+            {visiblePaddocks.map((f) => {
+              const s = selectionOf('paddock', f);
+              return (
+                <Row
+                  key={f.id}
+                  label={s.name || 'Unnamed'}
+                  color={s.color}
+                  meta={formatArea(s.area_m2) || undefined}
+                  onClick={() => onSelect(s)}
+                />
+              );
+            })}
+          </Section>
 
-      <Section title={`Points (${features.features.length})`}>
-        {features.features.map((f) => {
-          const s = selectionOf('feature', f);
-          return (
-            <Row
-              key={f.id}
-              label={s.name || s.type}
-              color={s.color}
-              meta={s.type}
-              onClick={() => onSelect(s)}
-            />
-          );
-        })}
-      </Section>
+          <Section title={`Poly runs (${visiblePolyRuns.length})`}>
+            {visiblePolyRuns.map((f) => {
+              const s = selectionOf('polyRun', f);
+              const meta = [
+                formatLength(s.length_m),
+                s.diameter_mm ? `${String(s.diameter_mm)} mm` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ');
+              return (
+                <Row
+                  key={f.id}
+                  label={s.name || 'Unnamed'}
+                  color={s.color}
+                  meta={meta || undefined}
+                  onClick={() => onSelect(s)}
+                />
+              );
+            })}
+          </Section>
+
+          <Section title={`Points (${visiblePoints.length})`}>
+            {visiblePoints.map((f) => {
+              const s = selectionOf('feature', f);
+              return (
+                <Row
+                  key={f.id}
+                  label={s.name || s.type}
+                  color={s.color}
+                  meta={s.type}
+                  onClick={() => onSelect(s)}
+                />
+              );
+            })}
+          </Section>
+        </>
+      )}
     </aside>
+  );
+}
+
+function SearchBar({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="relative mb-3">
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Search by name…"
+        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 pr-7 text-sm outline-none focus:border-brand"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          title="Clear search"
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TypeChips({
+  active,
+  onToggle,
+}: {
+  active: Set<PointType>;
+  onToggle: (t: PointType) => void;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap gap-1">
+      {POINT_TYPES.map((t) => {
+        const on = active.has(t);
+        return (
+          <button
+            key={t}
+            type="button"
+            onClick={() => onToggle(t)}
+            className={`rounded-full px-2 py-0.5 text-xs ${
+              on ? 'bg-brand text-white' : 'bg-slate-800 text-slate-300'
+            }`}
+          >
+            {t.replace('_', ' ')}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

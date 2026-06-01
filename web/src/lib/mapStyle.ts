@@ -2,7 +2,7 @@ import type { StyleSpecification } from 'maplibre-gl';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
 
-export type BasemapProvider = 'mapbox' | 'esri';
+export type BasemapProvider = 'mapbox' | 'esri' | 'qld';
 
 export interface BasemapConfig {
   tiles: string[];
@@ -21,6 +21,19 @@ export function basemapConfig(provider: BasemapProvider): BasemapConfig {
       tileSize: 256,
       maxzoom: 22,
       attribution: 'Imagery © Esri, Maxar, Earthstar Geographics',
+    };
+  }
+  if (provider === 'qld') {
+    // QLD Government "LatestStateProgram" — public SISP aerial imagery,
+    // typically 25 cm GSD, mosaicked across the state (≥3 yrs old).
+    // ArcGIS ImageServer with a cached XYZ tile endpoint.
+    return {
+      tiles: [
+        'https://spatial-img.information.qld.gov.au/arcgis/rest/services/Basemaps/LatestStateProgram_AllUsers/ImageServer/tile/{z}/{y}/{x}',
+      ],
+      tileSize: 256,
+      maxzoom: 21,
+      attribution: 'Imagery © State of Queensland (DNRMMRRD)',
     };
   }
   return {
@@ -71,6 +84,7 @@ export const FEATURE_COLORS: Record<string, string> = {
   bore: '#f59e0b',
   gate: '#f472b6',
   tank: '#34d399',
+  tap: '#60a5fa',
   other: '#e2e8f0',
 };
 

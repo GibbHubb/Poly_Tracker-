@@ -28,7 +28,7 @@ export function LayerToggle() {
 
       <p className="mb-1 mt-3 font-medium text-slate-300">Imagery</p>
       <div className="flex overflow-hidden rounded-md border border-slate-600">
-        {(['mapbox', 'esri'] as const).map((p) => (
+        {(['mapbox', 'esri', 'qld'] as const).map((p) => (
           <button
             key={p}
             onClick={() => setBasemap(p)}
@@ -38,7 +38,7 @@ export function LayerToggle() {
                 : 'bg-slate-900 text-slate-300'
             }`}
           >
-            {p}
+            {p === 'qld' ? 'QLD' : p}
           </button>
         ))}
       </div>

@@ -48,6 +48,7 @@ export function MapView({
   const [drawingShape, setDrawingShape] = useState<
     'line' | 'polygon' | 'circle' | null
   >(null);
+  const [bearing, setBearing] = useState(0);
   const visibleLayers = useAppStore((s) => s.visibleLayers);
   const basemap = useAppStore((s) => s.basemap);
 
@@ -206,6 +207,10 @@ export function MapView({
         );
       });
 
+      const onRotate = () => setBearing(map.getBearing());
+      map.on('rotate', onRotate);
+      map.on('rotateend', onRotate);
+
       setReady(true);
       cbRef.current.onReady?.(map);
     });
@@ -287,11 +292,12 @@ export function MapView({
   }, [ready, basemap]);
 
   const finishDrawing = () => {
-    // mapbox-gl-draw completes a line/polygon on Enter; synthesise it with
-    // keyCode defined (constructed KeyboardEvents default keyCode to 0).
+    // mapbox-gl-draw (and our CircleMode) finalise on Enter via onKeyUp, not
+    // keydown — synthesise keyup with keyCode defined (constructed
+    // KeyboardEvents default keyCode to 0).
     const el = mapRef.current?.getContainer();
     if (!el) return;
-    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+    const ev = new KeyboardEvent('keyup', { key: 'Enter', bubbles: true });
     Object.defineProperty(ev, 'keyCode', { get: () => 13 });
     el.dispatchEvent(ev);
   };
@@ -315,6 +321,8 @@ export function MapView({
       ? 'Click the centre, move out, then click again (or Finish)'
       : `Click to add points · drawing a ${drawingShape}`;
 
+  const resetNorth = () => mapRef.current?.easeTo({ bearing: 0, pitch: 0 });
+
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
@@ -324,6 +332,27 @@ export function MapView({
         className="absolute left-3 top-[150px] z-20 h-[29px] w-[29px] rounded bg-white text-base leading-none text-slate-800 shadow"
       >
         ◯
+      </button>
+      <button
+        onClick={resetNorth}
+        title="Reset to north (click)"
+        className="absolute right-3 top-[180px] z-20 flex h-14 w-14 items-center justify-center rounded-full border-2 border-slate-300 bg-white shadow-lg"
+        style={{ transform: `rotate(${-bearing}deg)` }}
+      >
+        <svg viewBox="0 0 56 56" className="h-full w-full">
+          <polygon points="28,8 33,28 28,24 23,28" fill="#dc2626" />
+          <polygon points="28,48 33,28 28,32 23,28" fill="#475569" />
+          <text
+            x="28"
+            y="6"
+            textAnchor="middle"
+            fontSize="8"
+            fontWeight="bold"
+            fill="#dc2626"
+          >
+            N
+          </text>
+        </svg>
       </button>
       {drawingShape && (
         <div className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-slate-900/95 px-4 py-2 text-sm text-slate-100 shadow-xl">

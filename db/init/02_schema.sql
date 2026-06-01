@@ -34,7 +34,7 @@ CREATE TABLE poly_runs (
 CREATE TABLE features (
     id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     farm_id    uuid NOT NULL REFERENCES farms(id) ON DELETE CASCADE,
-    type       text NOT NULL CHECK (type IN ('trough','turkey_nest','bore','gate','tank','other')),
+    type       text NOT NULL CHECK (type IN ('trough','turkey_nest','bore','gate','tank','tap','other')),
     name       text,
     geom       geometry(Point, 4326),
     color      text,

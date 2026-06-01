@@ -13,6 +13,7 @@ export const featureType = z.enum([
   'bore',
   'gate',
   'tank',
+  'tap',
   'other',
 ]);
 

@@ -10,6 +10,7 @@ export type PointType =
   | 'bore'
   | 'gate'
   | 'tank'
+  | 'tap'
   | 'other';
 
 export interface FeatureDialogResult {
@@ -55,6 +56,7 @@ const POINT_TYPES: PointType[] = [
   'bore',
   'gate',
   'tank',
+  'tap',
   'other',
 ];
 

@@ -11,6 +11,54 @@ interface ExportArgs {
   features: GeoJsonFeatureCollection;
 }
 
+/** Compass rose: white disc, red north arrow + grey south, "N" label. */
+function drawCompass(
+  doc: jsPDF,
+  cx: number,
+  cy: number,
+  r: number,
+  bearingDeg: number,
+): void {
+  doc.setFillColor(255, 255, 255);
+  doc.setDrawColor(71, 85, 105);
+  doc.setLineWidth(0.3);
+  doc.circle(cx, cy, r, 'FD');
+
+  const a = (-bearingDeg * Math.PI) / 180; // ccw from up
+  const sin = Math.sin(a);
+  const cos = Math.cos(a);
+  const tipR = r * 0.82;
+  const baseR = r * 0.18;
+  const halfW = r * 0.22;
+
+  // North half (red)
+  const nx = cx + sin * tipR;
+  const ny = cy - cos * tipR;
+  const nbx1 = cx + cos * halfW;
+  const nby1 = cy + sin * halfW;
+  const nbx2 = cx - cos * halfW;
+  const nby2 = cy - sin * halfW;
+  doc.setFillColor(220, 38, 38);
+  doc.triangle(nx, ny, nbx1, nby1, nbx2, nby2, 'F');
+
+  // South half (grey)
+  const sx = cx - sin * tipR;
+  const sy = cy + cos * tipR;
+  doc.setFillColor(71, 85, 105);
+  doc.triangle(sx, sy, nbx1, nby1, nbx2, nby2, 'F');
+
+  // "N" label outside the disc on the north side
+  const lx = cx + sin * (r + 1.8);
+  const ly = cy - cos * (r + 1.8) + 1;
+  doc.setFontSize(7);
+  doc.setTextColor(220, 38, 38);
+  doc.text('N', lx, ly, { align: 'center' });
+
+  // Tiny centre dot
+  doc.setFillColor(15, 23, 42);
+  doc.circle(cx, cy, baseR, 'F');
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return [100, 116, 139];
@@ -79,6 +127,10 @@ export async function exportFarmPdf({
   doc.addImage(img, 'PNG', boxX, boxY, w, h);
   doc.setDrawColor(203, 213, 225);
   doc.rect(boxX, boxY, w, h);
+
+  // Compass rose, bottom-right of the map image. Arrow points to true north
+  // on the captured image, accounting for any map bearing the user set.
+  drawCompass(doc, boxX + w - 14, boxY + h - 14, 9, map.getBearing());
 
   // Right column: counts + per-feature list with colour swatches.
   let x = pageW - margin - colW;

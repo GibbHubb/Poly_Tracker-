@@ -10,7 +10,8 @@ function initialBasemap(): BasemapProvider {
     typeof localStorage !== 'undefined'
       ? localStorage.getItem(BASEMAP_KEY)
       : null;
-  return v === 'esri' ? 'esri' : 'mapbox';
+  if (v === 'esri' || v === 'qld' || v === 'mapbox') return v;
+  return 'mapbox';
 }
 
 interface AppState {

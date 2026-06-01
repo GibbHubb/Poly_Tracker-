@@ -23,6 +23,7 @@ import {
 import { queueMutation } from '../lib/db';
 import { geometryCoords } from '../lib/geo';
 import { exportFarmPdf } from '../lib/exportPdf';
+import { formatArea, formatLength } from '../lib/units';
 
 const EMPTY: GeoJsonFeatureCollection = { type: 'FeatureCollection', features: [] };
 
@@ -337,6 +338,13 @@ export function FarmMap() {
               : undefined
           }
           featureId={editing?.id}
+          measurement={
+            editing?.kind === 'polyRun'
+              ? formatLength(editing.length_m) || undefined
+              : editing?.kind === 'paddock'
+                ? formatArea(editing.area_m2) || undefined
+                : undefined
+          }
           onPhotoUploaded={() => {
             void reloadPhotos();
           }}

@@ -1,5 +1,6 @@
 import type { GeoJsonFeature, GeoJsonFeatureCollection } from '../lib/api';
 import { FEATURE_COLORS, PALETTE } from '../lib/mapStyle';
+import { formatArea, formatLength } from '../lib/units';
 import type { DrawKind, PointType } from './FeatureDialog';
 
 export interface SidebarSelection {
@@ -14,6 +15,9 @@ export interface SidebarSelection {
   depth_m: number | null;
   material: string | null;
   installed_date: string | null;
+  // Derived, read-only (PT6): poly-run length / paddock area in base units.
+  length_m: number | null;
+  area_m2: number | null;
 }
 
 interface Props {
@@ -59,6 +63,8 @@ function selectionOf(
     material: strOrNull(p.material),
     // date input wants yyyy-mm-dd; trim any time component
     installed_date: strOrNull(p.installed_date)?.slice(0, 10) ?? null,
+    length_m: numOrNull(p.length_m),
+    area_m2: numOrNull(p.area_m2),
   };
 }
 
@@ -78,6 +84,7 @@ export function FeatureSidebar({
               key={f.id}
               label={s.name || 'Unnamed'}
               color={s.color}
+              meta={formatArea(s.area_m2) || undefined}
               onClick={() => onSelect(s)}
             />
           );
@@ -87,16 +94,18 @@ export function FeatureSidebar({
       <Section title={`Poly runs (${polyRuns.features.length})`}>
         {polyRuns.features.map((f) => {
           const s = selectionOf('polyRun', f);
+          const meta = [
+            formatLength(s.length_m),
+            s.diameter_mm ? `${String(s.diameter_mm)} mm` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ');
           return (
             <Row
               key={f.id}
               label={s.name || 'Unnamed'}
               color={s.color}
-              meta={
-                f.properties.diameter_mm
-                  ? `${String(f.properties.diameter_mm)} mm`
-                  : undefined
-              }
+              meta={meta || undefined}
               onClick={() => onSelect(s)}
             />
           );

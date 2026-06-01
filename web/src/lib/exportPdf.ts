@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import type { Farm, GeoJsonFeatureCollection } from './api';
 import { FEATURE_COLORS } from './mapStyle';
+import { formatArea, formatLength } from './units';
 
 interface ExportArgs {
   map: MapLibreMap;
@@ -162,15 +163,17 @@ export async function exportFarmPdf({
   doc.setFontSize(9);
   heading(`Paddocks (${paddocks.features.length})`);
   for (const f of paddocks.features) {
+    const area = formatArea(f.properties.area_m2);
     line(
-      String(f.properties.name ?? 'Unnamed'),
+      `${String(f.properties.name ?? 'Unnamed')}${area ? `  ·  ${area}` : ''}`,
       typeof f.properties.color === 'string' ? f.properties.color : '#22d3ee',
     );
   }
   heading(`Poly runs (${polyRuns.features.length})`);
   for (const f of polyRuns.features) {
+    const len = formatLength(f.properties.length_m);
     line(
-      String(f.properties.name ?? 'Unnamed'),
+      `${String(f.properties.name ?? 'Unnamed')}${len ? `  ·  ${len}` : ''}`,
       typeof f.properties.color === 'string' ? f.properties.color : '#f97316',
     );
   }

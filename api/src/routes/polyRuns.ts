@@ -17,7 +17,9 @@ const props = z
     color: z.string().nullish(),
     notes: z.string().nullish(),
   })
-  .passthrough();
+  // .strip() (default) drops unknown keys — in particular the read-only
+  // derived `length_m` must never reach an INSERT/UPDATE (PT6).
+  .strip();
 
 const featureInput = z.object({
   type: z.literal('Feature').optional(),
@@ -36,11 +38,14 @@ interface GeoRow {
   color: string | null;
   notes: string | null;
   created_at: string;
+  // Derived, read-only: ground length in metres (pg serialises as string).
+  length_m: number | string | null;
 }
 
 const SELECT = `
   SELECT id, name, diameter_mm, depth_m, material, installed_date, color,
-         notes, created_at, ST_AsGeoJSON(geom) AS geojson
+         notes, created_at, ST_Length(geom::geography) AS length_m,
+         ST_AsGeoJSON(geom) AS geojson
     FROM poly_runs WHERE farm_id = $1`;
 
 polyRunsRouter.get(
@@ -64,7 +69,9 @@ polyRunsRouter.post(
           color, notes, geom)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8, ST_SetSRID(ST_GeomFromGeoJSON($9), 4326))
        RETURNING id, name, diameter_mm, depth_m, material, installed_date,
-                 color, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
+                 color, notes, created_at,
+                 ST_Length(geom::geography) AS length_m,
+                 ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.farmId,
         p.name,
@@ -99,7 +106,9 @@ polyRunsRouter.patch(
          geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($10), 4326), geom)
        WHERE id = $1 AND farm_id = $2
        RETURNING id, name, diameter_mm, depth_m, material, installed_date,
-                 color, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
+                 color, notes, created_at,
+                 ST_Length(geom::geography) AS length_m,
+                 ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.runId,
         req.params.farmId,

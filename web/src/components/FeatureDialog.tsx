@@ -31,6 +31,11 @@ interface Props {
   initial?: FeatureDialogResult;
   /** Existing feature id — enables photo upload in edit mode. */
   featureId?: string;
+  /**
+   * Read-only derived measurement (PT6): formatted length for a poly-run /
+   * area for a paddock. Displayed only; never part of the submitted result.
+   */
+  measurement?: string;
   /** Called after a photo uploads, so the map photo layer can refresh. */
   onPhotoUploaded?: () => void;
   onCancel: () => void;
@@ -69,6 +74,7 @@ export function FeatureDialog({
   mode = 'create',
   initial,
   featureId,
+  measurement,
   onPhotoUploaded,
   onCancel,
   onSubmit,
@@ -154,6 +160,20 @@ export function FeatureDialog({
           }
           className={inputCls}
         />
+
+        {measurement && (
+          <>
+            <label className={labelCls}>
+              {kind === 'paddock' ? 'Area' : 'Length'}
+            </label>
+            <div
+              className={`${inputCls} text-slate-400`}
+              aria-readonly="true"
+            >
+              {measurement}
+            </div>
+          </>
+        )}
 
         {kind === 'feature' && (
           <>

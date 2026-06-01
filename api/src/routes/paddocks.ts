@@ -16,7 +16,9 @@ const featureInput = z.object({
       color: z.string().nullish(),
       notes: z.string().nullish(),
     })
-    .passthrough(),
+    // .strip() (default) drops unknown keys — in particular the read-only
+    // derived `area_m2` must never reach an INSERT/UPDATE (PT6).
+    .strip(),
 });
 
 interface GeoRow {
@@ -26,10 +28,13 @@ interface GeoRow {
   color: string | null;
   notes: string | null;
   created_at: string;
+  // Derived, read-only: area in square metres (pg serialises as string).
+  area_m2: number | string | null;
 }
 
 const SELECT = `
-  SELECT id, name, color, notes, created_at, ST_AsGeoJSON(geom) AS geojson
+  SELECT id, name, color, notes, created_at,
+         ST_Area(geom::geography) AS area_m2, ST_AsGeoJSON(geom) AS geojson
     FROM paddocks WHERE farm_id = $1`;
 
 paddocksRouter.get(
@@ -49,7 +54,9 @@ paddocksRouter.post(
     const { rows } = await query<GeoRow>(
       `INSERT INTO paddocks (farm_id, name, color, notes, geom)
        VALUES ($1, $2, $3, $4, ST_SetSRID(ST_GeomFromGeoJSON($5), 4326))
-       RETURNING id, name, color, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
+       RETURNING id, name, color, notes, created_at,
+                 ST_Area(geom::geography) AS area_m2,
+                 ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.farmId,
         body.properties.name,
@@ -74,7 +81,9 @@ paddocksRouter.patch(
          notes = $5,
          geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($6), 4326), geom)
        WHERE id = $1 AND farm_id = $2
-       RETURNING id, name, color, notes, created_at, ST_AsGeoJSON(geom) AS geojson`,
+       RETURNING id, name, color, notes, created_at,
+                 ST_Area(geom::geography) AS area_m2,
+                 ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.paddockId,
         req.params.farmId,

@@ -11,6 +11,9 @@ import {
 import { CircleMode } from '../lib/circleMode';
 import { toSource } from '../lib/geo';
 import { useAppStore } from '../lib/store';
+import { formatArea, formatLength } from '../lib/units';
+import turfLength from '@turf/length';
+import turfArea from '@turf/area';
 import type { GeoJsonFeature, GeoJsonFeatureCollection } from '../lib/api';
 
 interface MapViewProps {
@@ -49,8 +52,17 @@ export function MapView({
     'line' | 'polygon' | 'circle' | null
   >(null);
   const [bearing, setBearing] = useState(0);
+  // Live measurement of the in-progress draw geometry (PT7), shown in banner.
+  const [measure, setMeasure] = useState<string | null>(null);
+  // Mirror drawingShape into a ref so the (init-once) draw.render handler can
+  // tell a circle from a polygon without re-binding.
+  const drawingShapeRef = useRef<'line' | 'polygon' | 'circle' | null>(null);
   const visibleLayers = useAppStore((s) => s.visibleLayers);
   const basemap = useAppStore((s) => s.basemap);
+
+  useEffect(() => {
+    drawingShapeRef.current = drawingShape;
+  }, [drawingShape]);
 
   // Keep latest callbacks without re-running the init effect.
   const cbRef = useRef({ onCreate, onReady });
@@ -187,10 +199,46 @@ export function MapView({
         const f = e.features[0];
         if (!f) return;
         setDrawingShape(null);
+        setMeasure(null);
         cbRef.current.onCreate?.(f);
         // Clear from Draw; it will reappear via the saved-* layers once the
         // parent has persisted and reloaded the collection.
         if (f.id !== undefined) draw.delete(String(f.id));
+      });
+
+      // Live measurement of the geometry currently being drawn (PT7). Fires
+      // on every Draw re-render (vertex commit / mouse move while sizing).
+      // Measures committed vertices only — consistent on desktop and touch.
+      map.on('draw.render', () => {
+        const all = draw.getAll();
+        const g = all.features[all.features.length - 1]?.geometry;
+        if (!g) {
+          setMeasure(null);
+          return;
+        }
+        if (g.type === 'LineString') {
+          if (g.coordinates.length < 2) {
+            setMeasure(null);
+            return;
+          }
+          const km = turfLength({ type: 'Feature', geometry: g, properties: {} });
+          setMeasure(formatLength(km * 1000));
+        } else if (g.type === 'Polygon') {
+          // Need 3 distinct vertices + the closing point before an area exists.
+          if ((g.coordinates[0]?.length ?? 0) < 4) {
+            setMeasure(null);
+            return;
+          }
+          const m2 = turfArea({ type: 'Feature', geometry: g, properties: {} });
+          if (drawingShapeRef.current === 'circle') {
+            const r = Math.sqrt(m2 / Math.PI);
+            setMeasure(`r ${formatLength(r)} · ${formatArea(m2)}`);
+          } else {
+            setMeasure(formatArea(m2));
+          }
+        } else {
+          setMeasure(null);
+        }
       });
 
       // Track whether a multi-point shape is in progress so we can show an
@@ -309,6 +357,7 @@ export function MapView({
       draw.deleteAll(); // clear any half-drawn transient shape
     }
     setDrawingShape(null);
+    setMeasure(null);
   };
 
   const startCircle = () => {
@@ -357,6 +406,11 @@ export function MapView({
       {drawingShape && (
         <div className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-slate-900/95 px-4 py-2 text-sm text-slate-100 shadow-xl">
           <span>{hint}</span>
+          {measure && (
+            <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-brand">
+              {measure}
+            </span>
+          )}
           <button
             onClick={finishDrawing}
             className="rounded-md bg-brand px-3 py-1 font-medium text-white"

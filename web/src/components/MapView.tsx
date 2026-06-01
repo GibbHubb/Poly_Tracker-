@@ -58,6 +58,7 @@ export function MapView({
   // tell a circle from a polygon without re-binding.
   const drawingShapeRef = useRef<'line' | 'polygon' | 'circle' | null>(null);
   const visibleLayers = useAppStore((s) => s.visibleLayers);
+  const labels = useAppStore((s) => s.labels);
   const basemap = useAppStore((s) => s.basemap);
 
   useEffect(() => {
@@ -181,6 +182,67 @@ export function MapView({
           'circle-stroke-width': 2,
         },
       });
+      // Name/type text labels (PT8). Require the style's `glyphs` source.
+      // minzoom keeps them to paddock scale so they don't crowd the region view.
+      map.addLayer({
+        id: 'saved-paddocks-label',
+        type: 'symbol',
+        source: 'saved-paddocks',
+        minzoom: 12,
+        layout: {
+          'text-field': ['coalesce', ['get', 'name'], ''],
+          'text-font': ['Open Sans Bold'],
+          'text-size': 13,
+        },
+        paint: {
+          'text-color': '#f8fafc',
+          'text-halo-color': '#0f172a',
+          'text-halo-width': 1.4,
+        },
+      });
+      map.addLayer({
+        id: 'saved-polyruns-label',
+        type: 'symbol',
+        source: 'saved-polyruns',
+        minzoom: 12,
+        layout: {
+          'text-field': ['coalesce', ['get', 'name'], ''],
+          'text-font': ['Open Sans Regular'],
+          'text-size': 12,
+          'symbol-placement': 'line-center',
+        },
+        paint: {
+          'text-color': '#fed7aa',
+          'text-halo-color': '#0f172a',
+          'text-halo-width': 1.4,
+        },
+      });
+      map.addLayer({
+        id: 'saved-features-label',
+        type: 'symbol',
+        source: 'saved-features',
+        minzoom: 12,
+        layout: {
+          // Name on top, type (smaller) beneath when present.
+          'text-field': [
+            'format',
+            ['coalesce', ['get', 'name'], ['get', 'type'], ''],
+            {},
+            ['case', ['has', 'type'], ['concat', '\n', ['get', 'type']], ''],
+            { 'font-scale': 0.8 },
+          ],
+          'text-font': ['Open Sans Regular'],
+          'text-size': 12,
+          'text-offset': [0, -1.2],
+          'text-anchor': 'bottom',
+        },
+        paint: {
+          'text-color': '#e0f2fe',
+          'text-halo-color': '#0f172a',
+          'text-halo-width': 1.4,
+        },
+      });
+
       const openPhoto = (e: maplibregl.MapLayerMouseEvent) => {
         const url = e.features?.[0]?.properties?.url as string | undefined;
         if (url) window.open(url, '_blank', 'noopener');
@@ -313,7 +375,24 @@ export function MapView({
       'visibility',
       vis(visibleLayers.features),
     );
-  }, [ready, visibleLayers]);
+    // Labels (PT8): gated by the master Labels flag AND the matching layer's
+    // own visibility, so hiding a layer hides its labels too.
+    map.setLayoutProperty(
+      'saved-paddocks-label',
+      'visibility',
+      vis(labels && visibleLayers.paddocks),
+    );
+    map.setLayoutProperty(
+      'saved-polyruns-label',
+      'visibility',
+      vis(labels && visibleLayers.polyRuns),
+    );
+    map.setLayoutProperty(
+      'saved-features-label',
+      'visibility',
+      vis(labels && visibleLayers.features),
+    );
+  }, [ready, visibleLayers, labels]);
 
   // Swap the basemap provider in place (tileSize differs, so re-create the
   // source + layer) keeping it beneath the saved-feature layers and Draw.

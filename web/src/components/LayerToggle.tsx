@@ -9,6 +9,8 @@ const LABELS: Record<LayerKey, string> = {
 export function LayerToggle() {
   const visible = useAppStore((s) => s.visibleLayers);
   const toggle = useAppStore((s) => s.toggleLayer);
+  const labels = useAppStore((s) => s.labels);
+  const toggleLabels = useAppStore((s) => s.toggleLabels);
   const basemap = useAppStore((s) => s.basemap);
   const setBasemap = useAppStore((s) => s.setBasemap);
 
@@ -25,6 +27,10 @@ export function LayerToggle() {
           {LABELS[key]}
         </label>
       ))}
+      <label className="mt-1 flex items-center gap-2 border-t border-slate-700 py-1 pt-2">
+        <input type="checkbox" checked={labels} onChange={toggleLabels} />
+        Labels
+      </label>
 
       <p className="mb-1 mt-3 font-medium text-slate-300">Imagery</p>
       <div className="flex overflow-hidden rounded-md border border-slate-600">

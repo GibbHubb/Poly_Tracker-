@@ -17,6 +17,9 @@ function initialBasemap(): BasemapProvider {
 interface AppState {
   visibleLayers: Record<LayerKey, boolean>;
   toggleLayer: (key: LayerKey) => void;
+  // PT8: master on/off for on-map name/type labels (spans all three layers).
+  labels: boolean;
+  toggleLabels: () => void;
   selectedFeatureId: string | null;
   selectFeature: (id: string | null) => void;
   basemap: BasemapProvider;
@@ -29,6 +32,8 @@ export const useAppStore = create<AppState>((set) => ({
     set((s) => ({
       visibleLayers: { ...s.visibleLayers, [key]: !s.visibleLayers[key] },
     })),
+  labels: true,
+  toggleLabels: () => set((s) => ({ labels: !s.labels })),
   selectedFeatureId: null,
   selectFeature: (id) => set({ selectedFeatureId: id }),
   basemap: initialBasemap(),

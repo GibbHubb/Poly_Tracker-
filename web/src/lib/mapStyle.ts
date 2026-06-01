@@ -59,6 +59,11 @@ export function satelliteStyle(
   const c = basemapConfig(provider);
   return {
     version: 8,
+    // Glyphs are required for any symbol `text-field` (PT8 labels). Uses the
+    // Mapbox fonts endpoint (same token as the satellite tiles). NOTE: this is
+    // online-only — labels won't render with no connectivity. Self-hosting the
+    // glyph PBFs under web/public for full offline support is a follow-up (PT16).
+    glyphs: `https://api.mapbox.com/fonts/v1/mapbox/{fontstack}/{range}.pbf?access_token=${MAPBOX_TOKEN}`,
     sources: {
       satellite: {
         type: 'raster',

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { extname, join } from 'node:path';
 import { mkdirSync } from 'node:fs';
+import { unlink } from 'node:fs/promises';
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
@@ -105,10 +106,23 @@ photosRouter.post(
 photosRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    const { rowCount } = await query('DELETE FROM photos WHERE id = $1', [
-      req.params.id,
-    ]);
-    if (rowCount === 0) throw new HttpError(404, 'Photo not found');
+    // Read the path first (source of truth = DB row), delete the row, then
+    // best-effort unlink the file — a missing file must not fail the delete.
+    const { rows } = await query<{ path: string }>(
+      'SELECT path FROM photos WHERE id = $1',
+      [req.params.id],
+    );
+    const row = rows[0];
+    if (!row) throw new HttpError(404, 'Photo not found');
+    await query('DELETE FROM photos WHERE id = $1', [req.params.id]);
+    try {
+      await unlink(row.path);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') {
+        console.warn('[photos] unlink failed for', row.path, err);
+      }
+    }
     res.status(204).end();
   }),
 );

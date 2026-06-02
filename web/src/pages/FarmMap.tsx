@@ -8,6 +8,7 @@ import {
 } from '../components/FeatureSidebar';
 import { LayerToggle } from '../components/LayerToggle';
 import { ExportPdfButton } from '../components/ExportPdfButton';
+import { PhotoGallery } from '../components/PhotoGallery';
 import { PlaceSearch } from '../components/PlaceSearch';
 import {
   FeatureDialog,
@@ -66,6 +67,7 @@ export function FarmMap() {
   // Existing feature selected from the sidebar for editing.
   const [editing, setEditing] = useState<SidebarSelection | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
 
   const reload = useCallback(async () => {
     const [f, pd, pr, ft] = await Promise.all([
@@ -394,8 +396,22 @@ export function FarmMap() {
           <span className="rounded bg-slate-900/80 px-3 py-1 text-sm">
             {farm?.name ?? 'Loading…'}
           </span>
+          <button
+            onClick={() => setGalleryOpen(true)}
+            title="Photo gallery"
+            className="rounded-md bg-slate-900/90 px-3 py-1 text-sm text-slate-200 shadow-lg"
+          >
+            🖼 Gallery
+          </button>
           <ExportPdfButton onExport={handleExport} />
         </div>
+        {galleryOpen && (
+          <PhotoGallery
+            farmId={farmId}
+            onClose={() => setGalleryOpen(false)}
+            onChanged={() => void reloadPhotos()}
+          />
+        )}
       </div>
       <FeatureSidebar
         paddocks={paddocks}

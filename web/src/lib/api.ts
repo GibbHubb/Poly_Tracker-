@@ -116,6 +116,8 @@ export const api = {
         : '';
     return request<Photo[]>(`/photos${qs}`);
   },
+  deletePhoto: (id: string) =>
+    request<void>(`/photos/${id}`, { method: 'DELETE' }),
   /** Absolute URL the api serves the stored image bytes from. */
   photoFileUrl: (id: string) => `${BASE}/photos/file/${id}`,
 };

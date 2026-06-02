@@ -9,6 +9,7 @@ import {
   satelliteStyle,
 } from '../lib/mapStyle';
 import { CircleMode } from '../lib/circleMode';
+import { OfflineAreas } from './OfflineAreas';
 import { toSource } from '../lib/geo';
 import { useAppStore } from '../lib/store';
 import { formatArea, formatLength } from '../lib/units';
@@ -54,6 +55,8 @@ export function MapView({
   const [bearing, setBearing] = useState(0);
   // Live measurement of the in-progress draw geometry (PT7), shown in banner.
   const [measure, setMeasure] = useState<string | null>(null);
+  // Offline tile-download panel (PT11).
+  const [offlineOpen, setOfflineOpen] = useState(false);
   // Mirror drawingShape into a ref so the (init-once) draw.render handler can
   // tell a circle from a polygon without re-binding.
   const drawingShapeRef = useRef<'line' | 'polygon' | 'circle' | null>(null);
@@ -461,6 +464,20 @@ export function MapView({
       >
         ◯
       </button>
+      <button
+        onClick={() => setOfflineOpen((v) => !v)}
+        title="Download this area for offline use"
+        className="absolute left-3 top-[185px] z-20 h-[29px] w-[29px] rounded bg-white text-base leading-none text-slate-800 shadow"
+      >
+        ⬇
+      </button>
+      {offlineOpen && (
+        <OfflineAreas
+          map={mapRef.current}
+          provider={basemap}
+          onClose={() => setOfflineOpen(false)}
+        />
+      )}
       <button
         onClick={resetNorth}
         title="Reset to north (click)"

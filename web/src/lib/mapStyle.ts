@@ -79,6 +79,49 @@ export function satelliteStyle(
   };
 }
 
+// Providers whose ToS permit bulk offline pre-download (PT11). Mapbox is
+// excluded: its terms prohibit bulk caching and tiles are metered per request.
+export const BULK_SAFE_PROVIDERS: ReadonlySet<BasemapProvider> = new Set([
+  'esri',
+  'qld',
+]);
+
+/** Build a concrete tile URL from a provider's template (PT11). Works for
+ *  both `{z}/{x}/{y}` (Mapbox) and `{z}/{y}/{x}` (ArcGIS) orderings. */
+export function tileUrl(
+  provider: BasemapProvider,
+  z: number,
+  x: number,
+  y: number,
+): string {
+  const tmpl = basemapConfig(provider).tiles[0] ?? '';
+  return tmpl
+    .replace('{z}', String(z))
+    .replace('{x}', String(x))
+    .replace('{y}', String(y));
+}
+
+/** Slippy-map lon/lat + zoom → XYZ tile column/row (clamped to the zoom grid). */
+export function lngLatToTile(
+  lng: number,
+  lat: number,
+  z: number,
+): { x: number; y: number } {
+  const n = 2 ** z;
+  const latRad = (lat * Math.PI) / 180;
+  const clamp = (v: number) => Math.min(n - 1, Math.max(0, v));
+  return {
+    x: clamp(Math.floor(((lng + 180) / 360) * n)),
+    y: clamp(
+      Math.floor(
+        ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) /
+          2) *
+          n,
+      ),
+    ),
+  };
+}
+
 // Australia-wide default view until a farm has features to fit to.
 export const AUSTRALIA_CENTER: [number, number] = [134.0, -25.5];
 export const AUSTRALIA_ZOOM = 3.6;

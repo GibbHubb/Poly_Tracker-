@@ -9,6 +9,7 @@ import {
 import { LayerToggle } from '../components/LayerToggle';
 import { ExportPdfButton } from '../components/ExportPdfButton';
 import { PhotoGallery } from '../components/PhotoGallery';
+import { DataIoControls } from '../components/DataIoControls';
 import { PlaceSearch } from '../components/PlaceSearch';
 import {
   FeatureDialog,
@@ -22,6 +23,7 @@ import {
   type GeoJsonFeatureCollection,
 } from '../lib/api';
 import { queueMutation } from '../lib/db';
+import type { ImportPlan } from '../lib/importData';
 import { geometryCoords } from '../lib/geo';
 import { exportFarmPdf } from '../lib/exportPdf';
 import { formatArea, formatLength } from '../lib/units';
@@ -303,6 +305,50 @@ export function FarmMap() {
     await exportFarmPdf({ map, farm, paddocks, polyRuns, features });
   }, [farm, paddocks, polyRuns, features]);
 
+  const handleImport = useCallback(
+    async (plan: ImportPlan) => {
+      let created = 0;
+      let queued = 0;
+
+      const tryCreate = async (
+        kind: 'paddock' | 'polyRun' | 'feature',
+        feature: (typeof plan.paddocks)[number],
+      ) => {
+        try {
+          if (kind === 'paddock') await api.createPaddock(farmId, feature);
+          else if (kind === 'polyRun') await api.createPolyRun(farmId, feature);
+          else await api.createFeature(farmId, feature);
+          created++;
+        } catch {
+          const endpoint =
+            kind === 'paddock'
+              ? `/farms/${farmId}/paddocks`
+              : kind === 'polyRun'
+                ? `/farms/${farmId}/poly-runs`
+                : `/farms/${farmId}/features`;
+          await queueMutation({
+            id: crypto.randomUUID(),
+            op: 'create',
+            method: 'POST',
+            endpoint,
+            payload: feature,
+          });
+          queued++;
+        }
+      };
+
+      for (const f of plan.paddocks) await tryCreate('paddock', f);
+      for (const f of plan.polyRuns) await tryCreate('polyRun', f);
+      for (const f of plan.features) await tryCreate('feature', f);
+
+      await reload();
+      alert(
+        `Import complete: ${created} created, ${queued} queued offline, ${plan.skipped ?? 0} skipped.`,
+      );
+    },
+    [farmId, reload],
+  );
+
   return (
     <div className="flex h-full">
       <div className="relative min-w-0 flex-1">
@@ -403,6 +449,13 @@ export function FarmMap() {
           >
             🖼 Gallery
           </button>
+          <DataIoControls
+            farmName={farm?.name ?? 'farm'}
+            paddocks={paddocks}
+            polyRuns={polyRuns}
+            features={features}
+            onImport={handleImport}
+          />
           <ExportPdfButton onExport={handleExport} />
         </div>
         {galleryOpen && (

@@ -1,5 +1,32 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { ZodError } from 'zod';
+
+const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
+
+/** Bearer-token write gate. No-op when API_TOKEN is unset (open mode). */
+export const requireToken: RequestHandler = (req, res, next) => {
+  const token = process.env.API_TOKEN;
+  if (!token || !MUTATING_METHODS.has(req.method)) {
+    next();
+    return;
+  }
+  const header = req.headers.authorization ?? '';
+  const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
+  let authorized = false;
+  try {
+    if (provided.length === token.length) {
+      authorized = timingSafeEqual(Buffer.from(provided), Buffer.from(token));
+    }
+  } catch {
+    authorized = false;
+  }
+  if (!authorized) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  next();
+};
 
 /** Wrap an async route handler so thrown errors reach the error middleware. */
 export function asyncHandler(

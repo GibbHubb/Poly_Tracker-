@@ -1,4 +1,5 @@
 import { db, type PendingMutation } from './db';
+import { getApiToken } from './auth';
 
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -23,9 +24,12 @@ export async function replayQueue(): Promise<SyncResult> {
     const queue = await db.pending.orderBy('createdAt').toArray();
     for (const m of queue) {
       try {
+        const token = getApiToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
         const res = await fetch(`${BASE}${m.endpoint}`, {
           method: m.method,
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: m.method === 'DELETE' ? undefined : JSON.stringify(m.payload),
         });
         if (res.ok) {

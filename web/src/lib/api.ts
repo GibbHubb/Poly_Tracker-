@@ -1,5 +1,7 @@
 // Typed fetch client. All geo endpoints speak GeoJSON.
 
+import { getApiToken } from './auth';
+
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 
 export interface Farm {
@@ -44,9 +46,12 @@ export interface Photo {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getApiToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
   });
   if (!res.ok) {
     const text = await res.text();

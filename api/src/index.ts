@@ -6,13 +6,16 @@ import { paddocksRouter } from './routes/paddocks.js';
 import { polyRunsRouter } from './routes/polyRuns.js';
 import { featuresRouter } from './routes/features.js';
 import { photosRouter } from './routes/photos.js';
-import { errorHandler } from './middleware/index.js';
+import { errorHandler, requireToken } from './middleware/index.js';
 
 export const app = express();
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// Write gate: POST/PATCH/DELETE require Bearer token when API_TOKEN is set.
+app.use(requireToken);
 
 app.use('/api/farms', farmsRouter);
 app.use('/api/farms/:farmId/paddocks', paddocksRouter);

@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { db, pendingCount, type ConflictRecord } from '../lib/db';
 import { replayQueue } from '../lib/sync';
+import { useAuthStore } from '../lib/auth';
 
 export function Settings() {
   const [pending, setPending] = useState(0);
   const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
+  const { token, save: saveToken, clear: clearToken } = useAuthStore();
+  const [tokenInput, setTokenInput] = useState(token ?? '');
 
   const refresh = useCallback(() => {
     void pendingCount().then(setPending);
@@ -22,6 +25,41 @@ export function Settings() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4">
       <h1 className="text-xl font-semibold">Settings</h1>
+
+      <section className="rounded-lg border border-slate-800 p-4">
+        <h2 className="mb-3 font-medium">API access</h2>
+        <p className="mb-3 text-sm text-slate-400">
+          Token:{' '}
+          {token ? (
+            <span className="text-emerald-400">configured</span>
+          ) : (
+            <span className="text-amber-400">not set — writes allowed only if the server gate is disabled</span>
+          )}
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="password"
+            value={tokenInput}
+            onChange={(e) => setTokenInput(e.target.value)}
+            placeholder="Bearer token"
+            className="flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500"
+          />
+          <button
+            onClick={() => saveToken(tokenInput.trim())}
+            disabled={!tokenInput.trim()}
+            className="rounded-md bg-brand px-4 py-1.5 text-sm text-white disabled:opacity-40"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => { clearToken(); setTokenInput(''); }}
+            disabled={!token}
+            className="rounded-md bg-slate-700 px-4 py-1.5 text-sm text-white disabled:opacity-40"
+          >
+            Clear
+          </button>
+        </div>
+      </section>
 
       <section className="rounded-lg border border-slate-800 p-4">
         <h2 className="mb-2 font-medium">Map tiles</h2>

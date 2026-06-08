@@ -45,6 +45,7 @@ export async function replayQueue(): Promise<SyncResult> {
             method: m.method,
             status: res.status,
             resolvedAt: Date.now(),
+            payload: m.payload,
           });
           await db.pending.delete(m.id);
         } else {

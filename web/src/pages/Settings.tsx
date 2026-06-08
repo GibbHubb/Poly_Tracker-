@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { db, pendingCount, type ConflictRecord } from '../lib/db';
+import { db, pendingCount, queueMutation, type ConflictRecord } from '../lib/db';
 import { replayQueue } from '../lib/sync';
 import { useAuthStore } from '../lib/auth';
 
@@ -9,6 +9,7 @@ export function Settings() {
   const [msg, setMsg] = useState<string | null>(null);
   const { token, save: saveToken, clear: clearToken } = useAuthStore();
   const [tokenInput, setTokenInput] = useState(token ?? '');
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     void pendingCount().then(setPending);
@@ -129,19 +130,60 @@ export function Settings() {
             logged here.
           </p>
         ) : (
-          <ul className="space-y-1 text-sm">
+          <ul className="space-y-2 text-sm">
             {conflicts.map((c) => (
-              <li
-                key={c.id}
-                className="flex items-center justify-between rounded bg-slate-800/60 px-3 py-2"
-              >
-                <span>
-                  <span className="font-medium uppercase">{c.op}</span>{' '}
-                  <span className="text-slate-400">{c.endpoint}</span>
-                </span>
-                <span className="text-xs text-amber-400">
-                  {c.status} · {new Date(c.resolvedAt).toLocaleString()}
-                </span>
+              <li key={c.id} className="rounded bg-slate-800/60 px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <span>
+                    <span className="font-medium uppercase">{c.op}</span>{' '}
+                    <span className="text-slate-400">{c.endpoint}</span>
+                  </span>
+                  <span className="text-xs text-amber-400">
+                    {c.status} · {new Date(c.resolvedAt).toLocaleString()}
+                  </span>
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => setExpanded(expanded === c.id ? null : c.id)}
+                    className="rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
+                  >
+                    {expanded === c.id ? 'Hide' : 'View'} payload
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await queueMutation({
+                        id: c.id,
+                        op: c.op,
+                        endpoint: c.endpoint,
+                        method: c.method,
+                        payload: c.payload,
+                      });
+                      await db.conflicts.delete(c.id);
+                      await replayQueue();
+                      refresh();
+                      setMsg('Re-applied — check queue for result.');
+                    }}
+                    className="rounded bg-brand px-2 py-0.5 text-xs text-white"
+                  >
+                    Re-apply
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await db.conflicts.delete(c.id);
+                      refresh();
+                    }}
+                    className="rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
+                  >
+                    Discard
+                  </button>
+                </div>
+                {expanded === c.id && (
+                  <pre className="mt-2 max-h-40 overflow-auto rounded bg-slate-900 p-2 text-xs text-slate-300">
+                    {c.payload !== undefined
+                      ? JSON.stringify(c.payload, null, 2)
+                      : 'payload not captured (pre-PT15 conflict)'}
+                  </pre>
+                )}
               </li>
             ))}
           </ul>

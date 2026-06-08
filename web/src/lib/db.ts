@@ -40,6 +40,7 @@ export interface ConflictRecord {
   method: 'POST' | 'PATCH' | 'DELETE';
   status: number;
   resolvedAt: number;
+  payload?: unknown; // added in PT15; undefined on pre-PT15 records
 }
 
 class PolyTrackerDB extends Dexie {
@@ -61,6 +62,13 @@ class PolyTrackerDB extends Dexie {
     });
     // v3 (PT11): offline tile-area manifest. Additive — older clients ignore it.
     this.version(3).stores({
+      pending: 'id, createdAt',
+      farms: 'id',
+      conflicts: 'id, resolvedAt',
+      offlineAreas: 'id, createdAt',
+    });
+    // v4 (PT15): ConflictRecord gains `payload` field. Indexes unchanged — additive.
+    this.version(4).stores({
       pending: 'id, createdAt',
       farms: 'id',
       conflicts: 'id, resolvedAt',

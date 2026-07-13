@@ -12,3 +12,8 @@ body,
 .maplibregl-map {
   font: inherit;
 }
+
+/* Push the zoom controls below the top-right toolbar (top-3 = 12px + h-9 = 36px + 8px gap) */
+.maplibregl-ctrl-top-right {
+  margin-top: 56px;
+}

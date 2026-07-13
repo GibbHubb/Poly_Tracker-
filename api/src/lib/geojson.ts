@@ -13,6 +13,27 @@ export const geometrySchema = z.object({
 
 export type Geometry = z.infer<typeof geometrySchema>;
 
+/**
+ * Loose FeatureCollection schema for bulk import (PT19). Geometry is validated
+ * only enough to route by type here (any geometry type is allowed through so
+ * unsupported ones can be reported as "skipped" rather than rejecting the whole
+ * file); per-feature properties are validated later with each kind's own schema.
+ */
+export const importFeatureSchema = z.object({
+  type: z.literal('Feature').optional(),
+  geometry: z
+    .object({ type: z.string(), coordinates: z.any() })
+    .nullable(),
+  properties: z.record(z.unknown()).nullish(),
+});
+
+export const featureCollectionSchema = z.object({
+  type: z.literal('FeatureCollection'),
+  features: z.array(importFeatureSchema),
+});
+
+export type ImportFeature = z.infer<typeof importFeatureSchema>;
+
 export interface GeoJsonFeature<P extends Record<string, unknown>> {
   type: 'Feature';
   id: string;

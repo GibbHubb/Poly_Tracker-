@@ -1,6 +1,6 @@
 // Typed fetch client. All geo endpoints speak GeoJSON.
 
-import { getApiToken } from './auth';
+import { getReadToken, getWriteToken } from './auth';
 
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -45,8 +45,29 @@ export interface Photo {
   lng: string | null;
 }
 
+export interface ImportReportEntry {
+  index: number;
+  kind?: 'paddock' | 'polyRun' | 'feature';
+  status: 'inserted' | 'skipped' | 'error';
+  id?: string;
+  error?: string;
+}
+
+export interface ImportGeojsonReport {
+  mode: 'partial' | 'all-or-nothing';
+  committed: boolean;
+  inserted: number;
+  skipped: number;
+  errored: number;
+  report: ImportReportEntry[];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getApiToken();
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const isMutation = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
+  // Mutations use the write token; GETs use the read token, falling back to
+  // the write token (write ⊇ read). Header attached only when a token exists.
+  const token = isMutation ? getWriteToken() : getReadToken() ?? getWriteToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${BASE}${path}`, {
@@ -64,6 +85,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   listFarms: () => request<Farm[]>('/farms'),
   getFarm: (id: string) => request<Farm>(`/farms/${id}`),
+  /** GET a single record by its full relative path, e.g. /farms/x/paddocks/y.
+   *  Used by the conflict-merge flow to fetch current server state. */
+  getByPath: (path: string) => request<GeoJsonFeature>(path),
   createFarm: (body: { name: string; owner?: string | null }) =>
     request<Farm>('/farms', { method: 'POST', body: JSON.stringify(body) }),
 
@@ -125,4 +149,39 @@ export const api = {
     request<void>(`/photos/${id}`, { method: 'DELETE' }),
   /** Absolute URL the api serves the stored image bytes from. */
   photoFileUrl: (id: string) => `${BASE}/photos/file/${id}`,
+
+  /**
+   * Server-side bulk import (PT19): POST the raw GeoJSON file to
+   * /api/import/geojson as multipart/form-data. Bypasses request() because
+   * FormData needs the browser to set its own multipart boundary — a manual
+   * Content-Type header would break the upload.
+   *
+   * Default mode is all-or-nothing: the first bad feature rolls back the
+   * whole batch and the API answers 422 with a still-valid report body
+   * (committed: false), so 422 is treated as a normal response here rather
+   * than thrown as an error.
+   */
+  importGeojsonServer: async (
+    file: File,
+    farmId: string,
+    opts?: { partial?: boolean },
+  ): Promise<ImportGeojsonReport> => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('farm_id', farmId);
+    const qs = opts?.partial ? '?partial=true' : '';
+    const token = getWriteToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${BASE}/import/geojson${qs}`, {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+    if (!res.ok && res.status !== 422) {
+      const text = await res.text();
+      throw new Error(`API ${res.status}: ${text}`);
+    }
+    return (await res.json()) as ImportGeojsonReport;
+  },
 };

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
@@ -7,7 +8,7 @@ import { geometrySchema, rowsToCollection, rowToFeature } from '../lib/geojson.j
 // mergeParams: mounted at /api/farms/:farmId/paddocks
 export const paddocksRouter = Router({ mergeParams: true });
 
-const featureInput = z.object({
+export const featureInput = z.object({
   type: z.literal('Feature').optional(),
   geometry: geometrySchema,
   properties: z
@@ -37,6 +38,28 @@ const SELECT = `
          ST_Area(geom::geography) AS area_m2, ST_AsGeoJSON(geom) AS geojson
     FROM paddocks WHERE farm_id = $1`;
 
+/** INSERT a paddock on a caller-supplied transaction client (bulk import).
+ *  Same SQL as the POST handler; returns the new id. */
+export async function insertPaddockTx(
+  client: PoolClient,
+  farmId: string,
+  body: z.infer<typeof featureInput>,
+): Promise<string> {
+  const { rows } = await client.query<{ id: string }>(
+    `INSERT INTO paddocks (farm_id, name, color, notes, geom)
+     VALUES ($1, $2, $3, $4, ST_SetSRID(ST_GeomFromGeoJSON($5), 4326))
+     RETURNING id`,
+    [
+      farmId,
+      body.properties.name,
+      body.properties.color ?? null,
+      body.properties.notes ?? null,
+      JSON.stringify(body.geometry),
+    ],
+  );
+  return rows[0]!.id;
+}
+
 paddocksRouter.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -44,6 +67,18 @@ paddocksRouter.get(
       req.params.farmId,
     ]);
     res.json(rowsToCollection(rows));
+  }),
+);
+
+paddocksRouter.get(
+  '/:paddockId',
+  asyncHandler(async (req, res) => {
+    const { rows } = await query<GeoRow>(`${SELECT} AND id = $2`, [
+      req.params.farmId,
+      req.params.paddockId,
+    ]);
+    if (rows.length === 0) throw new HttpError(404, 'Paddock not found');
+    res.json(rowToFeature(rows[0]!));
   }),
 );
 

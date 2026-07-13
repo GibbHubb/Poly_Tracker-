@@ -450,11 +450,13 @@ export function FarmMap() {
             🖼 Gallery
           </button>
           <DataIoControls
+            farmId={farmId}
             farmName={farm?.name ?? 'farm'}
             paddocks={paddocks}
             polyRuns={polyRuns}
             features={features}
             onImport={handleImport}
+            onServerImportComplete={() => void reload()}
           />
           <ExportPdfButton onExport={handleExport} />
         </div>

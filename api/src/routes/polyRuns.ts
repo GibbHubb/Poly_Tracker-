@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
@@ -21,7 +22,7 @@ const props = z
   // derived `length_m` must never reach an INSERT/UPDATE (PT6).
   .strip();
 
-const featureInput = z.object({
+export const featureInput = z.object({
   type: z.literal('Feature').optional(),
   geometry: geometrySchema,
   properties: props,
@@ -48,6 +49,35 @@ const SELECT = `
          ST_AsGeoJSON(geom) AS geojson
     FROM poly_runs WHERE farm_id = $1`;
 
+/** INSERT a poly-run on a caller-supplied transaction client (bulk import).
+ *  Same SQL as the POST handler; returns the new id. */
+export async function insertPolyRunTx(
+  client: PoolClient,
+  farmId: string,
+  body: z.infer<typeof featureInput>,
+): Promise<string> {
+  const p = body.properties;
+  const { rows } = await client.query<{ id: string }>(
+    `INSERT INTO poly_runs
+       (farm_id, name, diameter_mm, depth_m, material, installed_date,
+        color, notes, geom)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8, ST_SetSRID(ST_GeomFromGeoJSON($9), 4326))
+     RETURNING id`,
+    [
+      farmId,
+      p.name,
+      p.diameter_mm ?? null,
+      p.depth_m ?? null,
+      p.material ?? null,
+      p.installed_date ?? null,
+      p.color ?? null,
+      p.notes ?? null,
+      JSON.stringify(body.geometry),
+    ],
+  );
+  return rows[0]!.id;
+}
+
 polyRunsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -55,6 +85,18 @@ polyRunsRouter.get(
       req.params.farmId,
     ]);
     res.json(rowsToCollection(rows));
+  }),
+);
+
+polyRunsRouter.get(
+  '/:runId',
+  asyncHandler(async (req, res) => {
+    const { rows } = await query<GeoRow>(`${SELECT} AND id = $2`, [
+      req.params.farmId,
+      req.params.runId,
+    ]);
+    if (rows.length === 0) throw new HttpError(404, 'Poly run not found');
+    res.json(rowToFeature(rows[0]!));
   }),
 );
 

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
@@ -17,7 +18,7 @@ export const featureType = z.enum([
   'other',
 ]);
 
-const featureInput = z.object({
+export const featureInput = z.object({
   type: z.literal('Feature').optional(),
   geometry: geometrySchema,
   properties: z
@@ -44,6 +45,29 @@ const SELECT = `
   SELECT id, type, name, color, notes, created_at, ST_AsGeoJSON(geom) AS geojson
     FROM features WHERE farm_id = $1`;
 
+/** INSERT a point feature on a caller-supplied transaction client (bulk import).
+ *  Same SQL as the POST handler; returns the new id. */
+export async function insertFeatureTx(
+  client: PoolClient,
+  farmId: string,
+  body: z.infer<typeof featureInput>,
+): Promise<string> {
+  const { rows } = await client.query<{ id: string }>(
+    `INSERT INTO features (farm_id, type, name, color, notes, geom)
+     VALUES ($1,$2,$3,$4,$5, ST_SetSRID(ST_GeomFromGeoJSON($6), 4326))
+     RETURNING id`,
+    [
+      farmId,
+      body.properties.type,
+      body.properties.name ?? null,
+      body.properties.color ?? null,
+      body.properties.notes ?? null,
+      JSON.stringify(body.geometry),
+    ],
+  );
+  return rows[0]!.id;
+}
+
 featuresRouter.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -51,6 +75,18 @@ featuresRouter.get(
       req.params.farmId,
     ]);
     res.json(rowsToCollection(rows));
+  }),
+);
+
+featuresRouter.get(
+  '/:featureId',
+  asyncHandler(async (req, res) => {
+    const { rows } = await query<GeoRow>(`${SELECT} AND id = $2`, [
+      req.params.farmId,
+      req.params.featureId,
+    ]);
+    if (rows.length === 0) throw new HttpError(404, 'Feature not found');
+    res.json(rowToFeature(rows[0]!));
   }),
 );
 

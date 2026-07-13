@@ -109,6 +109,47 @@ list. No server/Puppeteer; the export always matches the on-screen view.
 - Terminate TLS at nginx (or an upstream LB) in production — the service
   worker and geolocation require a secure context off `localhost`.
 
+## Public access (Cloudflare named tunnel)
+
+To expose the local stack on a **stable public URL** (survives restarts), use a
+Cloudflare *named* tunnel. This is the supported way to put Poly_Tracker online —
+quick tunnels (`*.trycloudflare.com`) get a new random URL every launch and are
+not persisted.
+
+One-time setup (Cloudflare Zero Trust dashboard):
+
+1. Add a domain to your Cloudflare account.
+2. **Networks → Tunnels → Create a tunnel → Cloudflared.** Name it `poly-tracker`.
+3. **Public Hostname:** subdomain (e.g. `poly`) on your domain → Service
+   `HTTP` → `localhost:8080`.
+4. Copy the **connector token** and paste it into `.env` as
+   `CLOUDFLARE_TUNNEL_TOKEN=...`.
+
+Then, any time you want it online:
+
+```powershell
+./scripts/tunnel.ps1          # starts the prod stack + connects the named tunnel
+./scripts/tunnel.ps1 -NoStack # tunnel only (stack already up)
+```
+
+The app is then live at the hostname you configured (e.g.
+`https://poly.yourdomain.com`). `cloudflared` install:
+`winget install Cloudflare.cloudflared`.
+
+### Quick tunnel (no domain, throwaway URL)
+
+If you don't have a domain on Cloudflare yet, use a **quick tunnel** — no
+account/token needed. It prints a random `*.trycloudflare.com` URL that lives
+only while the command runs and changes on every launch:
+
+```powershell
+./scripts/tunnel.ps1 -Quick
+```
+
+Good for a one-off field test or sharing a link for a few hours; not a
+permanent address. Upgrade to the named tunnel above once a domain is on
+Cloudflare.
+
 ## Repo layout
 
 See the tree in the project brief. Key entrypoints: `api/src/index.ts`,

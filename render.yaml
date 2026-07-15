@@ -1,0 +1,64 @@
+# Render Blueprint — provisions the whole Poly_Tracker stack in one Apply:
+#   - a managed Postgres (PostGIS enabled via the one-time db:init step)
+#   - the Dockerized Express API
+#   - the static Vite PWA frontend
+#
+# Deploy: connect the GitHub repo in Render → "New +" → "Blueprint" → pick this
+# file → Apply. Then set the two secrets marked `sync: false` and run the
+# one-time schema init. Full walkthrough in DEPLOY.md.
+
+databases:
+  - name: poly-tracker-db
+    databaseName: poly_tracker
+    user: poly
+    plan: free                 # free PG expires ~30 days; bump to `starter` for durability
+    postgresMajorVersion: "16"
+
+services:
+  # --- API: Dockerized Express + node-postgres ---
+  # NOTE: *.onrender.com is a GLOBAL namespace across all Render users, so
+  # plain "poly-tracker" is already taken. These distinctive names avoid the
+  # collision; rename freely to any FREE subdomain (or add a custom domain).
+  - type: web
+    name: gibbhubb-poly-tracker-api
+    runtime: docker
+    plan: free                 # free web services cold-start after idle (~30-60s)
+    dockerfilePath: ./api/Dockerfile.prod
+    dockerContext: ./api
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: poly-tracker-db
+          property: connectionString
+      - key: PGSSL
+        value: "true"          # flip to "false" if the API logs an SSL connection error
+      - key: NODE_ENV
+        value: production
+      - key: PHOTO_STORAGE_PATH
+        value: /data/photos     # ephemeral without a paid disk — geometry/PDF are the demo surface
+
+  # --- Web: static Vite PWA ---
+  - type: web
+    name: gibbhubb-poly-tracker
+    runtime: static
+    buildCommand: cd web && npm ci && npm run build
+    staticPublishPath: ./web/dist
+    envVars:
+      # Points the SPA at the API's public URL. Left unset here on purpose:
+      # you can't know the API's final hostname until it deploys (names may get
+      # a suffix). After the first deploy, set this to the API service's real
+      # URL + "/api" (e.g. https://gibbhubb-poly-tracker-api.onrender.com/api)
+      # and redeploy the web service — Vite bakes env at build time. See DEPLOY.md.
+      - key: VITE_API_BASE
+        sync: false
+      - key: VITE_MAPBOX_TOKEN
+        sync: false             # secret — paste the pk.… token in the Render dashboard
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache

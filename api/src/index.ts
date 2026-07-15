@@ -45,7 +45,9 @@ if (isMain) {
         `reads ${readToken ? 'REQUIRE a token' : 'OPEN'}`,
     );
   }
-  const port = Number(process.env.API_PORT ?? 3001);
+  // Render (and most PaaS) inject the bind port as $PORT; local compose sets
+  // API_PORT. Prefer PORT so the managed deploy's health check reaches us.
+  const port = Number(process.env.PORT ?? process.env.API_PORT ?? 3001);
   app.listen(port, () => {
     console.log(`[api] listening on :${port}`);
   });

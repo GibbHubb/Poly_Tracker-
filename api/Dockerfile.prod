@@ -1,0 +1,26 @@
+# Production image for the Poly_Tracker API (Render / any container host).
+# Multi-stage: compile TS in a build stage, then run the built JS with
+# prod-only deps. The dev Dockerfile (CMD npm run dev / tsx watch) is unchanged.
+# Build context is ./api (see render.yaml dockerContext).
+
+# --- build stage ---
+FROM node:20-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+# --- runtime stage ---
+FROM node:20-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/dist ./dist
+# Photo uploads land here; ephemeral on hosts without an attached disk.
+RUN mkdir -p /data/photos
+# Render injects $PORT and index.ts binds it; EXPOSE is documentation only.
+EXPOSE 3001
+CMD ["node", "dist/index.js"]

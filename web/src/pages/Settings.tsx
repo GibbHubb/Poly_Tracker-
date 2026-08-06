@@ -139,12 +139,19 @@ export function Settings() {
         geometry?: unknown;
       };
       const patch = buildMergedPatch(mine, merge.server, merge.keepServer);
+      // PT18-fu2 — pin the merge to the version it was computed against, not
+      // the stale one that caused the conflict. Replaying against the old
+      // version would 412 forever; replaying with no precondition at all
+      // would clobber a third write that landed while the user was deciding.
+      const serverVersion = (merge.server as { properties?: Record<string, unknown> })
+        .properties?.version;
       await queueMutation({
         id: merge.conflict.id,
         op: merge.conflict.op,
         endpoint: merge.conflict.endpoint,
         method: 'PATCH',
         payload: patch,
+        baseVersion: typeof serverVersion === 'number' ? serverVersion : null,
       });
       await db.conflicts.delete(merge.conflict.id);
       await replayQueue();

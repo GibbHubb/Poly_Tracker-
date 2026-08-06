@@ -19,6 +19,11 @@ export interface SidebarSelection {
   // Derived, read-only (PT6): poly-run length / paddock area in base units.
   length_m: number | null;
   area_m2: number | null;
+  // PT18-fu2 — the row version this selection was read at, sent back as
+  // If-Match so a stale edit is refused with 412 instead of silently
+  // overwriting someone else's. Null for poly-runs, which have no version
+  // column (PT18-fu1 covered farms/paddocks/features only).
+  version: number | null;
 }
 
 interface Props {
@@ -50,6 +55,7 @@ function selectionOf(
     kind,
     id: String(f.id),
     geometry: f.geometry,
+    version: typeof p.version === 'number' ? p.version : null,
     name: String(p.name ?? ''),
     color:
       typeof p.color === 'string' && p.color

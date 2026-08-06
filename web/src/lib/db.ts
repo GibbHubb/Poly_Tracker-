@@ -9,6 +9,10 @@ export interface PendingMutation {
   method: 'POST' | 'PATCH' | 'DELETE';
   payload: unknown;
   createdAt: number;
+  // PT18-fu2 — row version at the time the edit was made, replayed as
+  // If-Match. Undefined/null means "no precondition", which is what
+  // poly-runs and creates want. Not indexed, so no Dexie schema bump.
+  baseVersion?: number | null;
 }
 
 export interface CachedFarm {

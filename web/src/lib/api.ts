@@ -62,6 +62,31 @@ export interface ImportGeojsonReport {
   report: ImportReportEntry[];
 }
 
+/**
+ * PT18-fu2 — an HTTP failure, carrying its status.
+ *
+ * `request` used to throw a bare Error whose only clue was the status
+ * embedded in the message, so callers could not tell a 412 conflict from a
+ * network drop. That mattered the moment the API started emitting 412: the
+ * offline-queue fallback catches everything, so a conflict would have been
+ * mistaken for "offline", queued, and replayed — overwriting exactly the
+ * write the precondition existed to protect.
+ */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(`API ${status}: ${body}`);
+    this.name = 'ApiError';
+  }
+}
+
+/** True for the conflict statuses the replay/merge path handles. */
+export function isConflictError(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 409 || err.status === 412);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase();
   const isMutation = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
@@ -76,7 +101,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`API ${res.status}: ${text}`);
+    throw new ApiError(res.status, text);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -114,20 +139,42 @@ export const api = {
       body: JSON.stringify(f),
     }),
 
-  updatePaddock: (farmId: string, id: string, f: Partial<GeoJsonFeature>) =>
+  // PT18-fu2 — `baseVersion` becomes If-Match, so a stale edit gets a 412
+  // rather than silently clobbering a newer one. Omit it to keep the old
+  // last-write-wins behaviour.
+  updatePaddock: (
+    farmId: string,
+    id: string,
+    f: Partial<GeoJsonFeature>,
+    baseVersion?: number | null,
+  ) =>
     request<GeoJsonFeature>(`/farms/${farmId}/paddocks/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(f),
+      ...(baseVersion != null
+        ? { headers: { 'If-Match': `"${baseVersion}"` } }
+        : {}),
     }),
   updatePolyRun: (farmId: string, id: string, f: Partial<GeoJsonFeature>) =>
     request<GeoJsonFeature>(`/farms/${farmId}/poly-runs/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(f),
     }),
-  updateFeature: (farmId: string, id: string, f: Partial<GeoJsonFeature>) =>
+  // PT18-fu2 — `baseVersion` becomes If-Match, so a stale edit gets a 412
+  // rather than silently clobbering a newer one. Omit it to keep the old
+  // last-write-wins behaviour.
+  updateFeature: (
+    farmId: string,
+    id: string,
+    f: Partial<GeoJsonFeature>,
+    baseVersion?: number | null,
+  ) =>
     request<GeoJsonFeature>(`/farms/${farmId}/features/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(f),
+      ...(baseVersion != null
+        ? { headers: { 'If-Match': `"${baseVersion}"` } }
+        : {}),
     }),
 
   deletePaddock: (farmId: string, id: string) =>

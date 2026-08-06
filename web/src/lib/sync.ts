@@ -28,6 +28,10 @@ export async function replayQueue(): Promise<SyncResult> {
         const token = getWriteToken();
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
+        // PT18-fu2 — replay against the version the edit was made on. This is
+        // what makes the 409/412 branch below reachable organically: without
+        // it the server has no precondition to fail and every replay wins.
+        if (m.baseVersion != null) headers['If-Match'] = `"${m.baseVersion}"`;
         const res = await fetch(`${BASE}${m.endpoint}`, {
           method: m.method,
           headers,

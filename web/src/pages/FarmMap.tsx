@@ -18,11 +18,13 @@ import {
 } from '../components/FeatureDialog';
 import {
   api,
+  ApiError,
+  isConflictError,
   type Farm,
   type GeoJsonFeature,
   type GeoJsonFeatureCollection,
 } from '../lib/api';
-import { queueMutation } from '../lib/db';
+import { db, queueMutation } from '../lib/db';
 import type { ImportPlan } from '../lib/importData';
 import { geometryCoords } from '../lib/geo';
 import { exportFarmPdf } from '../lib/exportPdf';
@@ -240,32 +242,52 @@ export function FarmMap() {
   const handleEditSubmit = useCallback(
     async (r: FeatureDialogResult) => {
       if (!editing) return;
-      const { kind, id } = editing;
+      const { kind, id, version } = editing;
       setEditing(null);
 
       const patch: Partial<GeoJsonFeature> = {
         properties: propsFor(kind, r),
       };
 
+      const endpoint =
+        kind === 'paddock'
+          ? `/farms/${farmId}/paddocks/${id}`
+          : kind === 'polyRun'
+            ? `/farms/${farmId}/poly-runs/${id}`
+            : `/farms/${farmId}/features/${id}`;
+
       try {
-        if (kind === 'paddock') await api.updatePaddock(farmId, id, patch);
+        // PT18-fu2 — send the version this edit was based on. Poly-runs pass
+        // null (no version column), keeping their previous behaviour.
+        if (kind === 'paddock') await api.updatePaddock(farmId, id, patch, version);
         else if (kind === 'polyRun')
           await api.updatePolyRun(farmId, id, patch);
-        else await api.updateFeature(farmId, id, patch);
+        else await api.updateFeature(farmId, id, patch, version);
         await reload();
-      } catch {
-        const endpoint =
-          kind === 'paddock'
-            ? `/farms/${farmId}/paddocks/${id}`
-            : kind === 'polyRun'
-              ? `/farms/${farmId}/poly-runs/${id}`
-              : `/farms/${farmId}/features/${id}`;
+      } catch (err) {
+        // PT18-fu2 — a conflict is NOT an offline failure. Queuing it would
+        // replay the very write the precondition just refused, so it goes to
+        // the conflict store (where PT18's merge UI reads from) instead.
+        if (isConflictError(err)) {
+          await db.conflicts.put({
+            id: crypto.randomUUID(),
+            op: 'update',
+            endpoint,
+            method: 'PATCH',
+            status: (err as ApiError).status,
+            resolvedAt: Date.now(),
+            payload: patch,
+          });
+          await reload();
+          return;
+        }
         await queueMutation({
           id: crypto.randomUUID(),
           op: 'update',
           method: 'PATCH',
           endpoint,
           payload: patch,
+          baseVersion: version,
         });
       }
     },

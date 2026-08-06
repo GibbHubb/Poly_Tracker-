@@ -59,11 +59,22 @@ export function satelliteStyle(
   const c = basemapConfig(provider);
   return {
     version: 8,
-    // Glyphs are required for any symbol `text-field` (PT8 labels). Uses the
-    // Mapbox fonts endpoint (same token as the satellite tiles). NOTE: this is
-    // online-only — labels won't render with no connectivity. Self-hosting the
-    // glyph PBFs under web/public for full offline support is a follow-up (PT16).
-    glyphs: `https://api.mapbox.com/fonts/v1/mapbox/{fontstack}/{range}.pbf?access_token=${MAPBOX_TOKEN}`,
+    // Glyphs are required for any symbol `text-field` (PT8 labels).
+    //
+    // PT16 — self-hosted. This used to hit the Mapbox fonts endpoint, which
+    // is online-only, so labels silently vanished offline while the rest of
+    // the PWA kept working. The PBFs now ship in web/public/fonts and are
+    // precached by Workbox alongside everything else.
+    //
+    // Source: openmaptiles/fonts v2.0 (Open Sans, Apache-2.0) — see
+    // public/fonts/README.md. Only the Latin ranges 0-255 and 256-511 are
+    // bundled, which covers Basic Latin, Latin-1 Supplement and Latin
+    // Extended-A; that is every character a farm/paddock/feature name has
+    // realistically used, and keeps the precache to ~296 KB rather than the
+    // ~1.6 MB a full 256-range set for both weights would add. A name using
+    // characters outside those blocks would request a range that isn't there
+    // and lose its label — add the range to public/fonts if that ever happens.
+    glyphs: `${import.meta.env.BASE_URL}fonts/{fontstack}/{range}.pbf`,
     sources: {
       satellite: {
         type: 'raster',

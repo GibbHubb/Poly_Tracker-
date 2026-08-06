@@ -11,7 +11,10 @@ export default defineConfig({
       filename: 'sw.ts',
       registerType: 'autoUpdate',
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // PT16 — `pbf` added so the self-hosted glyph ranges are precached.
+        // Without it the files ship but are only fetched on demand, which is
+        // exactly the online-only behaviour PT16 exists to remove.
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2,pbf}'],
       },
       manifest: {
         name: 'Poly Tracker',

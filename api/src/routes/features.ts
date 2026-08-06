@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
+import { parseIfMatch, setVersionETag, throwUpdateConflict } from '../lib/concurrency.js';
 import { geometrySchema, rowsToCollection, rowToFeature } from '../lib/geojson.js';
 
 // mergeParams: mounted at /api/farms/:farmId/features
@@ -39,10 +40,11 @@ interface GeoRow {
   color: string | null;
   notes: string | null;
   created_at: string;
+  version: number;
 }
 
 const SELECT = `
-  SELECT id, type, name, color, notes, created_at, ST_AsGeoJSON(geom) AS geojson
+  SELECT id, type, name, color, notes, created_at, version, ST_AsGeoJSON(geom) AS geojson
     FROM features WHERE farm_id = $1`;
 
 /** INSERT a point feature on a caller-supplied transaction client (bulk import).
@@ -97,7 +99,7 @@ featuresRouter.post(
     const { rows } = await query<GeoRow>(
       `INSERT INTO features (farm_id, type, name, color, notes, geom)
        VALUES ($1,$2,$3,$4,$5, ST_SetSRID(ST_GeomFromGeoJSON($6), 4326))
-       RETURNING id, type, name, color, notes, created_at,
+       RETURNING id, type, name, color, notes, created_at, version,
                  ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.farmId,
@@ -117,6 +119,8 @@ featuresRouter.patch(
   asyncHandler(async (req, res) => {
     const body = featureInput.partial({ geometry: true }).parse(req.body);
     const p = body.properties ?? {};
+    // PT18-fu1 — no If-Match means no precondition, i.e. previous behaviour.
+    const expected = parseIfMatch(req);
     const { rows } = await query<GeoRow>(
       // Full-replace owned attributes (client always submits the complete
       // set) so emptying a field clears it; geometry stays COALESCE since
@@ -126,9 +130,11 @@ featuresRouter.patch(
          name = $4,
          color = $5,
          notes = $6,
-         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($7), 4326), geom)
+         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($7), 4326), geom),
+         version = version + 1
        WHERE id = $1 AND farm_id = $2
-       RETURNING id, type, name, color, notes, created_at,
+         AND ($8::int IS NULL OR version = $8)
+       RETURNING id, type, name, color, notes, created_at, version,
                  ST_AsGeoJSON(geom) AS geojson`,
       [
         req.params.featureId,
@@ -138,9 +144,16 @@ featuresRouter.patch(
         p.color ?? null,
         p.notes ?? null,
         body.geometry ? JSON.stringify(body.geometry) : null,
+        expected,
       ],
     );
-    if (rows.length === 0) throw new HttpError(404, 'Feature not found');
+    if (rows.length === 0) {
+      if (expected !== null) {
+        await throwUpdateConflict('features', req.params.featureId, expected, 'Feature not found');
+      }
+      throw new HttpError(404, 'Feature not found');
+    }
+    setVersionETag(res, rows[0]!.version);
     res.json(rowToFeature(rows[0]!));
   }),
 );

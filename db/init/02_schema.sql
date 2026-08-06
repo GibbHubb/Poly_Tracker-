@@ -4,7 +4,8 @@ CREATE TABLE farms (
     id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name       text NOT NULL,
     owner      text,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    version    integer NOT NULL DEFAULT 1  -- PT18-fu1 optimistic concurrency
 );
 
 CREATE TABLE paddocks (
@@ -14,7 +15,8 @@ CREATE TABLE paddocks (
     geom       geometry(Polygon, 4326),
     color      text,
     notes      text,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    version    integer NOT NULL DEFAULT 1  -- PT18-fu1 optimistic concurrency
 );
 
 CREATE TABLE poly_runs (
@@ -39,7 +41,8 @@ CREATE TABLE features (
     geom       geometry(Point, 4326),
     color      text,
     notes      text,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    version    integer NOT NULL DEFAULT 1  -- PT18-fu1 optimistic concurrency
 );
 
 CREATE TABLE photos (

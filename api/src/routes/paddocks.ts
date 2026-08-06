@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
 import { geometrySchema, rowsToCollection, rowToFeature } from '../lib/geojson.js';
+import { parseIfMatch, setVersionETag, throwUpdateConflict } from '../lib/concurrency.js';
 
 // mergeParams: mounted at /api/farms/:farmId/paddocks
 export const paddocksRouter = Router({ mergeParams: true });
@@ -31,10 +32,11 @@ interface GeoRow {
   created_at: string;
   // Derived, read-only: area in square metres (pg serialises as string).
   area_m2: number | string | null;
+  version: number;
 }
 
 const SELECT = `
-  SELECT id, name, color, notes, created_at,
+  SELECT id, name, color, notes, created_at, version,
          ST_Area(geom::geography) AS area_m2, ST_AsGeoJSON(geom) AS geojson
     FROM paddocks WHERE farm_id = $1`;
 
@@ -89,7 +91,7 @@ paddocksRouter.post(
     const { rows } = await query<GeoRow>(
       `INSERT INTO paddocks (farm_id, name, color, notes, geom)
        VALUES ($1, $2, $3, $4, ST_SetSRID(ST_GeomFromGeoJSON($5), 4326))
-       RETURNING id, name, color, notes, created_at,
+       RETURNING id, name, color, notes, created_at, version,
                  ST_Area(geom::geography) AS area_m2,
                  ST_AsGeoJSON(geom) AS geojson`,
       [
@@ -108,15 +110,19 @@ paddocksRouter.patch(
   '/:paddockId',
   asyncHandler(async (req, res) => {
     const body = featureInput.partial({ geometry: true }).parse(req.body);
+    // PT18-fu1 — no If-Match means no precondition, i.e. previous behaviour.
+    const expected = parseIfMatch(req);
     const { rows } = await query<GeoRow>(
       // Full-replace owned attributes (see features.ts); geometry COALESCE.
       `UPDATE paddocks SET
          name = $3,
          color = $4,
          notes = $5,
-         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($6), 4326), geom)
+         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($6), 4326), geom),
+         version = version + 1
        WHERE id = $1 AND farm_id = $2
-       RETURNING id, name, color, notes, created_at,
+         AND ($7::int IS NULL OR version = $7)
+       RETURNING id, name, color, notes, created_at, version,
                  ST_Area(geom::geography) AS area_m2,
                  ST_AsGeoJSON(geom) AS geojson`,
       [
@@ -126,9 +132,16 @@ paddocksRouter.patch(
         body.properties?.color ?? null,
         body.properties?.notes ?? null,
         body.geometry ? JSON.stringify(body.geometry) : null,
+        expected,
       ],
     );
-    if (rows.length === 0) throw new HttpError(404, 'Paddock not found');
+    if (rows.length === 0) {
+      if (expected !== null) {
+        await throwUpdateConflict('paddocks', req.params.paddockId, expected, 'Paddock not found');
+      }
+      throw new HttpError(404, 'Paddock not found');
+    }
+    setVersionETag(res, rows[0]!.version);
     res.json(rowToFeature(rows[0]!));
   }),
 );

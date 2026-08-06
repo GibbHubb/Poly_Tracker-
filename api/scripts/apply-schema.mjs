@@ -12,7 +12,7 @@
 // Idempotent: extensions use IF NOT EXISTS, and the schema is applied only when
 // the `farms` table is absent — so re-running is a safe no-op.
 
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import pg from 'pg';
@@ -46,6 +46,24 @@ try {
     const schema = await readFile(join(initDir, '02_schema.sql'), 'utf8');
     await client.query(schema);
     console.log('✓ schema applied (5 tables + GIST indexes, SRID 4326)');
+  }
+
+  // Additive migrations run on EVERY invocation, not just a fresh database —
+  // the schema-present check above short-circuits 02_schema.sql, so anything
+  // added after the initial release would otherwise never reach an existing
+  // deployment. Each file must therefore be written idempotently
+  // (ADD COLUMN IF NOT EXISTS and friends).
+  const migrationsDir = join(here, '..', '..', 'db', 'migrations');
+  let migrations = [];
+  try {
+    migrations = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
+  } catch {
+    // No migrations directory yet — nothing to apply.
+  }
+  for (const file of migrations) {
+    const sql = await readFile(join(migrationsDir, file), 'utf8');
+    await client.query(sql);
+    console.log(`✓ migration applied: ${file}`);
   }
 
   const v = await client.query('SELECT postgis_version() AS v');

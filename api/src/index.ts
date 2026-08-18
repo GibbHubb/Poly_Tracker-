@@ -8,12 +8,27 @@ import { featuresRouter } from './routes/features.js';
 import { photosRouter } from './routes/photos.js';
 import { importRouter } from './routes/import.js';
 import { errorHandler, requireToken } from './middleware/index.js';
+import { query } from './db.js';
 
 export const app = express();
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
+// PT22: this check MUST touch the database. It previously returned a hardcoded
+// {ok:true}, so when Render deleted the free Postgres the service still reported
+// healthy for days while every data route was dead.
+app.get('/api/health', async (_req, res) => {
+  try {
+    await query('SELECT 1');
+    res.json({ ok: true, db: 'up' });
+  } catch (err) {
+    res.status(503).json({
+      ok: false,
+      db: 'down',
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
 
 // Auth gate: mutations require the write token; reads require a read token
 // only when one is configured. No-op (open mode) when neither is set.

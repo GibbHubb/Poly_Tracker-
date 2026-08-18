@@ -7,12 +7,19 @@
 # file → Apply. Then set the two secrets marked `sync: false` and run the
 # one-time schema init. Full walkthrough in DEPLOY.md.
 
-databases:
-  - name: poly-tracker-db
-    databaseName: poly_tracker
-    user: poly
-    plan: free                 # free PG expires ~30 days; bump to `starter` for durability
-    postgresMajorVersion: "16"
+# PT22 (2026-08-18): the Postgres is NO LONGER on Render. Render's free Postgres
+# has a hard ~30-day delete clock that a keepalive cannot stop, and it fired —
+# the original `poly-tracker-db` was deleted and the API began returning
+# `getaddrinfo ENOTFOUND dpg-…` while /api/health still reported {ok:true}.
+#
+# The database now lives in the existing free Supabase project, in a dedicated
+# `poly` schema owned by a `poly_app` role that is scoped to that schema only
+# (it cannot read Our_Menu's tables). No hard expiry, and OM36's keepalive
+# already keeps that project awake.
+#
+# DATABASE_URL must use the Supabase POOLER host, not `db.<ref>.supabase.co` —
+# the direct host is IPv6-only and Render's free tier is IPv4-only outbound.
+# Session mode (port 5432) is required so the role's search_path persists.
 
 services:
   # --- API: Dockerized Express + node-postgres ---
@@ -27,12 +34,18 @@ services:
     dockerContext: ./api
     healthCheckPath: /api/health
     envVars:
+      # Supabase pooler URL — paste in the Render dashboard, never commit it.
+      # Shape: postgresql://poly_app.<project-ref>:<pw>@aws-1-eu-west-1.pooler.supabase.com:5432/postgres
+      #
+      # ⚠️ Do NOT append `?sslmode=require`. pg's connection-string parser then
+      # builds its own verifying TLS config, which overrides the
+      # `ssl: { rejectUnauthorized: false }` in api/src/db.ts and the API dies with
+      # SELF_SIGNED_CERT_IN_CHAIN. TLS is switched on by PGSSL=true below.
+      # Verified 2026-08-18: with sslmode → 503; without → 200 {"ok":true,"db":"up"}.
       - key: DATABASE_URL
-        fromDatabase:
-          name: poly-tracker-db
-          property: connectionString
+        sync: false
       - key: PGSSL
-        value: "true"          # flip to "false" if the API logs an SSL connection error
+        value: "true"          # Supabase requires TLS; do NOT flip this to false
       - key: NODE_ENV
         value: production
       - key: PHOTO_STORAGE_PATH

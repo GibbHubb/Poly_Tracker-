@@ -32,12 +32,15 @@ must never contain.
 1. Sign in at <https://render.com> and connect the `GibbHubb/Poly_Tracker-`
    GitHub repo (Account → GitHub).
 2. **New +** → **Blueprint** → select this repo → Render reads `render.yaml` and
-   shows three resources: `poly-tracker-db`, `poly-tracker-api`, `poly-tracker`.
+   shows **two** resources: `gibbhubb-poly-tracker-api` and `gibbhubb-poly-tracker`.
+   There is no database resource — see §3.
 3. When prompted for the `sync: false` env vars, paste:
-   - **`VITE_MAPBOX_TOKEN`** (on the `poly-tracker` web service) — your public
+   - **`DATABASE_URL`** (on the **api** service) — the Supabase pooler URL. See §3.
+   - **`VITE_MAPBOX_TOKEN`** (on the **web** service) — your public
      Mapbox token (`pk.…`) from <https://account.mapbox.com/access-tokens/>.
-4. Click **Apply**. Render provisions the DB, builds the API image, and builds
-   the static site. First build takes a few minutes.
+   - **`VITE_API_BASE`** (on the **web** service) — see §2.
+4. Click **Apply**. Render builds the API image and the static site. First build
+   takes a few minutes.
 
 ### 2. Point the frontend at the API (after first deploy)
 `VITE_API_BASE` is intentionally left unset in `render.yaml` — the API's final
@@ -50,24 +53,36 @@ hostname isn't known until it deploys. Once the API service is live:
    at build time, so it must rebuild). Skipping this leaves the app calling the
    wrong origin and every API request fails.
 
-### 3. Initialise the database schema (once)
-Render does **not** run `db/init/*.sql` for you. After the DB shows *Available*,
-copy its **External Connection String** (Dashboard → `poly-tracker-db` →
-Connect → External), then from your machine:
+### 3. The database (Supabase — already provisioned)
+**The database is not on Render.** Render's free Postgres has a hard ~30-day
+delete clock that no keepalive can stop, and it fired: the original
+`poly-tracker-db` was deleted and the API started returning
+`getaddrinfo ENOTFOUND dpg-…`.
 
-```bash
-cd api
-npm ci                       # installs the pg driver locally (once)
-DATABASE_URL="<external connection string>" PGSSL=true npm run db:init
+The DB now lives in the existing **free Supabase project**, in a dedicated
+`poly` schema owned by a `poly_app` role scoped to that schema only. No hard
+expiry, and the Our_Menu keepalive already keeps the project awake.
+
+**Already done (2026-08-18) — no action needed:** PostGIS 3.3 enabled, `poly`
+schema created, all 5 tables + GIST indexes applied at SRID 4326, `poly_app`
+role created and granted, verified permission-denied on `public.*` and `auth.*`.
+
+The only step is to paste `DATABASE_URL` on the api service. It is recorded as
+`POLY_TRACKER_DATABASE_URL` in `backlog_bandit/.env` (gitignored). Shape:
+
+```
+postgresql://poly_app.<project-ref>:<password>@aws-1-eu-west-1.pooler.supabase.com:5432/postgres
 ```
 
-Expected output:
-```
-✓ extensions ensured (postgis, pgcrypto)
-✓ schema applied (5 tables + GIST indexes, SRID 4326)
-✓ postgis_version: 3.x …
-```
-It's idempotent — safe to re-run (it no-ops if the schema is already there).
+⚠️ **Three things about that URL are load-bearing:**
+- **Use the pooler host**, not `db.<ref>.supabase.co` — the direct host is
+  **IPv6-only** and Render's free tier is IPv4-only outbound.
+- **Port 5432 (session mode)**, not 6543 — the `poly_app` role's `search_path`
+  must persist, since the schema files use unqualified table names.
+- **No `?sslmode=require`.** pg's connection-string parser then builds its own
+  verifying TLS config, overriding `rejectUnauthorized: false` in
+  `api/src/db.ts`, and the API dies with `SELF_SIGNED_CERT_IN_CHAIN`. TLS comes
+  from `PGSSL=true`. Measured: with the param → 503; without → 200.
 
 ### 4. Verify
 - Open the web app's URL (`https://gibbhubb-poly-tracker.onrender.com`) — the map loads over HTTPS.
@@ -79,9 +94,15 @@ It's idempotent — safe to re-run (it no-ops if the schema is already there).
 ## Notes & gotchas
 
 - **Free tier trade-offs.** Free web services **spin down when idle** (first hit
-  after a pause cold-starts in ~30–60s). The free Postgres instance **expires
-  after ~30 days**. For an always-warm, durable deploy, change both `plan: free`
-  lines in `render.yaml` to `plan: starter` (a few $/month) and re-Apply.
+  after a pause cold-starts in ~30–60s; measured 12.5s cold vs 0.58s warm).
+  This stack is deliberately **100% free** — the database expiry that used to
+  live here is gone now that Postgres is on Supabase, and the cold start is the
+  only remaining free-tier cost. Do not "fix" it by moving to a paid plan.
+- **`/api/health` queries the database.** It used to return a hardcoded
+  `{ok:true}`, which is exactly why a deleted database read as healthy for days.
+  It now runs `SELECT 1` and returns **503** `{"ok":false,"db":"down"}` when the
+  DB is unreachable. That means Render will correctly mark the service unhealthy
+  if the DB dies — intended, since the app is useless without it.
 - **Custom domain.** To replace `gibbhubb-poly-tracker.onrender.com` with your
   own (e.g. `polytracker.<yourdomain>`), add it on the web service → Settings →
   Custom Domains and point a CNAME at Render. Then set `VITE_API_BASE` to the

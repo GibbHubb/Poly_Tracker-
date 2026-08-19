@@ -50,6 +50,17 @@ services:
         value: production
       - key: PHOTO_STORAGE_PATH
         value: /data/photos     # ephemeral without a paid disk — geometry/PDF are the demo surface
+      # PT23 — the write gate. Render generates the value on Apply; copy it out
+      # of the dashboard once and paste it into the SPA (Settings → API token),
+      # which keeps it in localStorage. It is deliberately NOT a VITE_* build
+      # var: anything Vite bakes in ships inside the public bundle, so a token
+      # published that way protects nothing.
+      #
+      # With NODE_ENV=production and this unset, every POST/PATCH/DELETE now
+      # answers 503 rather than succeeding — the deployment fails closed. Reads
+      # stay open on purpose (no API_READ_TOKEN); the map is meant to be viewable.
+      - key: API_WRITE_TOKEN
+        generateValue: true
 
   # --- Web: static Vite PWA ---
   - type: web

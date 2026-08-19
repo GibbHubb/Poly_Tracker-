@@ -115,9 +115,23 @@ postgresql://poly_app.<project-ref>:<password>@aws-1-eu-west-1.pooler.supabase.c
 - **Photos are ephemeral.** `/data/photos` is wiped on redeploy without a paid
   disk. Geometry + PDF export (the demo surface) are unaffected. A durable photo
   store is a follow-up.
-- **Public API is open CRUD.** The auth gate is off (open mode). To lock writes,
-  set `API_WRITE_TOKEN` on the API service and supply it from the client — a
-  separate hardening task.
+- **Writes fail closed in production (PT23).** The API used to serve
+  unauthenticated CRUD whenever `API_WRITE_TOKEN` was unset — a forgotten
+  dashboard field was the only thing between the public URL and "anyone can
+  delete every farm". With `NODE_ENV=production` and no write token, every
+  `POST`/`PATCH`/`DELETE` now answers
+  **503 `{"error":"Writes are disabled: API_WRITE_TOKEN is not configured…"}`**
+  instead. Reads stay open — the map is meant to be viewable.
+
+  To turn writes on: `render.yaml` declares `API_WRITE_TOKEN` with
+  `generateValue: true`, so Render mints one on Apply. Copy it from the API
+  service → Environment, open the SPA → **Settings**, and paste it as the API
+  token; it is kept in `localStorage` and sent as `Authorization: Bearer …`.
+  **Do not** ship it as a `VITE_*` build var — Vite bakes those into the public
+  bundle, so the "secret" would be readable by anyone who opens devtools.
+
+  Local dev and the test suite are unaffected: without `NODE_ENV=production`
+  the gate stays in open mode exactly as before.
 
 ## Tear down
 

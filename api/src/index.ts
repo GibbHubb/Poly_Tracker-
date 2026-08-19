@@ -31,7 +31,8 @@ app.get('/api/health', async (_req, res) => {
 });
 
 // Auth gate: mutations require the write token; reads require a read token
-// only when one is configured. No-op (open mode) when neither is set.
+// only when one is configured. Open mode (neither set) is a dev-only state —
+// PT23 makes production refuse writes outright rather than serve them openly.
 app.use(requireToken);
 
 app.use('/api/farms', farmsRouter);
@@ -51,9 +52,19 @@ if (isMain) {
   const writeToken = process.env.API_WRITE_TOKEN || process.env.API_TOKEN;
   const readToken = process.env.API_READ_TOKEN;
   if (!writeToken && !readToken) {
-    console.warn(
-      '[api] no API tokens set — auth gate DISABLED (open mode: reads AND writes are public)',
-    );
+    // PT23 — say which of the two states this actually is. In production the
+    // gate is not "disabled", it is refusing every write with a 503, and the
+    // operator needs to read that as "set API_WRITE_TOKEN", not as an outage.
+    if (process.env.NODE_ENV === 'production') {
+      console.warn(
+        '[api] API_WRITE_TOKEN is not set — all writes will be refused with 503. ' +
+          'Set it on this service to enable them.',
+      );
+    } else {
+      console.warn(
+        '[api] no API tokens set — auth gate DISABLED (open mode: reads AND writes are public)',
+      );
+    }
   } else {
     console.log(
       `[api] auth gate: writes ${writeToken ? 'REQUIRE a token' : 'OPEN (no write token)'}; ` +

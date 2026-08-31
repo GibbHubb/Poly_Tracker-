@@ -11,7 +11,22 @@ import { asyncHandler, HttpError } from '../middleware/index.js';
 export const photosRouter = Router();
 
 const STORAGE = process.env.PHOTO_STORAGE_PATH ?? '/data/photos';
-mkdirSync(STORAGE, { recursive: true });
+
+// PT21 — this used to be a bare mkdirSync at import time. On a serverless host
+// the filesystem is read-only outside /tmp, so that call throws EROFS while the
+// module is being loaded and takes down EVERY route in the app, not just this
+// one. Record the failure instead and refuse uploads with a reason (§4: photo
+// storage is deliberately not implemented on Vercel — see PT24).
+let storageError: string | null = null;
+try {
+  mkdirSync(STORAGE, { recursive: true });
+} catch (err) {
+  storageError = err instanceof Error ? err.message : String(err);
+  console.warn(
+    `[photos] storage path ${STORAGE} is not writable — uploads will be refused with 503:`,
+    storageError,
+  );
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, STORAGE),
@@ -83,6 +98,21 @@ photosRouter.get(
 
 photosRouter.post(
   '/',
+  // Fail closed BEFORE multer touches the disk: an upload that is accepted and
+  // then evaporates is worse than one that is refused with a reason.
+  (_req, _res, next) => {
+    if (storageError) {
+      next(
+        new HttpError(
+          503,
+          `Photo storage is unavailable on this deployment (${STORAGE}: ${storageError}). ` +
+            'Photo upload needs object storage — see PT24.',
+        ),
+      );
+      return;
+    }
+    next();
+  },
   upload.single('photo'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'photo file is required');

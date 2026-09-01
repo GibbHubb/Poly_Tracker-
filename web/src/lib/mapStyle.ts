@@ -2,6 +2,19 @@ import type { StyleSpecification } from 'maplibre-gl';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
 
+/**
+ * PT25 — is there a Mapbox token at all?
+ *
+ * Exported so the default provider and the layer switcher agree. Mapbox tiles
+ * are requested with `access_token=${MAPBOX_TOKEN}`; empty, every tile 401s and
+ * the map is a grey rectangle. There is no automatic fallback inside
+ * `basemapConfig` on purpose — silently serving Esri while the switcher still
+ * says "mapbox" would be a different lie. The choice is made once, up front.
+ */
+export function hasMapboxToken(): boolean {
+  return MAPBOX_TOKEN.trim().length > 0;
+}
+
 export type BasemapProvider = 'mapbox' | 'esri' | 'qld';
 
 export interface BasemapConfig {

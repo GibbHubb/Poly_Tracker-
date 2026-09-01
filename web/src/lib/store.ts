@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { BasemapProvider } from './mapStyle';
+import { hasMapboxToken, type BasemapProvider } from './mapStyle';
 
 export type LayerKey = 'paddocks' | 'polyRuns' | 'features';
 
@@ -11,7 +11,12 @@ function initialBasemap(): BasemapProvider {
       ? localStorage.getItem(BASEMAP_KEY)
       : null;
   if (v === 'esri' || v === 'qld' || v === 'mapbox') return v;
-  return 'mapbox';
+  // PT25 — Mapbox is the better imagery and stays the default WHEN there is a
+  // token to fetch it with. Without one the app still asked Mapbox, with an
+  // empty access_token, so every tile 401'd and you got a grey rectangle with
+  // no explanation — which reads as "the app is broken" rather than "a key is
+  // missing", and that is the expensive diagnosis. Esri needs no token.
+  return hasMapboxToken() ? 'mapbox' : 'esri';
 }
 
 interface AppState {

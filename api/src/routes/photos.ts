@@ -1,40 +1,23 @@
-import { randomUUID } from 'node:crypto';
-import { extname, join } from 'node:path';
-import { mkdirSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
+import { extname } from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
+import { createPhotoStore } from '../storage/index.js';
 
 export const photosRouter = Router();
 
-const STORAGE = process.env.PHOTO_STORAGE_PATH ?? '/data/photos';
+// PT24 — where the bytes go is a backend choice now (disk for self-hosting,
+// Supabase Storage on Vercel). Constructing a store never throws; if this
+// deployment cannot take uploads, `store.unavailable` carries the reason and
+// POST refuses with a 503 (the PT21 property).
+const store = createPhotoStore();
 
-// PT21 — this used to be a bare mkdirSync at import time. On a serverless host
-// the filesystem is read-only outside /tmp, so that call throws EROFS while the
-// module is being loaded and takes down EVERY route in the app, not just this
-// one. Record the failure instead and refuse uploads with a reason (§4: photo
-// storage is deliberately not implemented on Vercel — see PT24).
-let storageError: string | null = null;
-try {
-  mkdirSync(STORAGE, { recursive: true });
-} catch (err) {
-  storageError = err instanceof Error ? err.message : String(err);
-  console.warn(
-    `[photos] storage path ${STORAGE} is not writable — uploads will be refused with 503:`,
-    storageError,
-  );
-}
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, STORAGE),
-  filename: (_req, file, cb) =>
-    cb(null, `${randomUUID()}${extname(file.originalname) || '.jpg'}`),
-});
+// Bytes come to us, not to a disk multer picked: the store decides where they
+// land. The 25 MB cap is unchanged, and now bounds an in-memory buffer.
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 },
 });
 
@@ -92,7 +75,14 @@ photosRouter.get(
     );
     const row = rows[0];
     if (!row) throw new HttpError(404, 'Photo not found');
-    res.sendFile(row.path);
+    // PT24 — this URL is the stable public interface and deliberately did NOT
+    // change: `MapView.tsx` and `PhotoUpload.tsx` open it as a real NAVIGATION,
+    // and `photoFileUrl` builds it everywhere else. The object backend answers
+    // by redirecting here to a short-lived signed URL, which keeps the bucket
+    // private and keeps every caller working untouched.
+    const resolved = await store.resolve(row.path);
+    if (resolved.kind === 'redirect') res.redirect(302, resolved.url);
+    else res.sendFile(resolved.path);
   }),
 );
 
@@ -101,12 +91,11 @@ photosRouter.post(
   // Fail closed BEFORE multer touches the disk: an upload that is accepted and
   // then evaporates is worse than one that is refused with a reason.
   (_req, _res, next) => {
-    if (storageError) {
+    if (store.unavailable) {
       next(
         new HttpError(
           503,
-          `Photo storage is unavailable on this deployment (${STORAGE}: ${storageError}). ` +
-            'Photo upload needs object storage — see PT24.',
+          `Photo storage is unavailable on this deployment (${store.unavailable})`,
         ),
       );
       return;
@@ -117,13 +106,23 @@ photosRouter.post(
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'photo file is required');
     const meta = metaInput.parse(req.body);
+    // Store the bytes BEFORE the row: a row pointing at an object that was
+    // never written is a broken image with no way to tell; an object with no
+    // row is an orphan. Nothing reclaims orphans today and one can be up to
+    // the 25 MB limit, so if uploads ever fail often this needs a sweeper
+    // (tracked as PT27).
+    const key = await store.put(
+      req.file.buffer,
+      extname(req.file.originalname),
+      req.file.mimetype,
+    );
     const { rows } = await query<PhotoRow>(
       `INSERT INTO photos (feature_type, feature_id, path, taken_at, lat, lng)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [
         meta.feature_type ?? null,
         meta.feature_id ?? null,
-        join(STORAGE, req.file.filename),
+        key,
         meta.taken_at ?? null,
         meta.lat ?? null,
         meta.lng ?? null,
@@ -145,14 +144,7 @@ photosRouter.delete(
     const row = rows[0];
     if (!row) throw new HttpError(404, 'Photo not found');
     await query('DELETE FROM photos WHERE id = $1', [req.params.id]);
-    try {
-      await unlink(row.path);
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') {
-        console.warn('[photos] unlink failed for', row.path, err);
-      }
-    }
+    await store.remove(row.path); // best-effort; a missing object is not an error
     res.status(204).end();
   }),
 );

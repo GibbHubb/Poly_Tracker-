@@ -116,12 +116,24 @@ branch-scoped environment variable so only that branch is affected.
 - **Cold starts** replace Render's 30–60s spin-up with a function cold start of
   a second or two. Strictly better, and the stack is still 100% free. Do not
   "fix" it by moving to a paid plan.
-- **Photo upload does not work on this platform, and says so.** `photos.ts`
-  writes through `multer.diskStorage()`; Vercel's filesystem is read-only
-  outside `/tmp` and ephemeral anyway. It used to `mkdirSync` at import time,
-  which threw `EROFS` while the module loaded and took down **every** route in
-  the app. It now records the failure and refuses uploads with a 503 naming the
-  reason. A real object store is **PT24**.
+- **Photo upload needs `PHOTO_BACKEND=supabase` here (PT24).** Vercel's
+  filesystem is read-only outside `/tmp` and ephemeral anyway, so the default
+  `disk` backend cannot work on this platform — it refuses uploads with a 503
+  naming the reason. (It used to `mkdirSync` at import time, which threw
+  `EROFS` while the module loaded and took down **every** route in the app, not
+  just this one.) Set these three on the Vercel project:
+
+  ```
+  PHOTO_BACKEND=supabase
+  SUPABASE_URL=https://<project-ref>.supabase.co
+  SUPABASE_SERVICE_ROLE_KEY=<service role key>
+  # SUPABASE_PHOTO_BUCKET=poly-photos   # the default
+  ```
+
+  The bucket is **private**; `GET /api/photos/file/:id` answers **302** to a
+  60-second signed URL, so the key never reaches a browser and no frontend URL
+  changed. Verify with `backlog_bandit/scripts/pt24_verify.py` (API, includes a
+  real process restart) and `pt24_browser.py` (the image actually painting).
 - **The basemap does not fall back.** With `VITE_MAPBOX_TOKEN` unset the app
   still asks Mapbox with an empty `access_token` and the map goes blank — Esri
   is a provider you *choose* in the layer switcher, not an automatic fallback

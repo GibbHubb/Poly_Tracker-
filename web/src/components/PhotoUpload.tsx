@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import exifr from 'exifr';
+import { db } from '../lib/db';
+import { PhotoQueueFullError, queuePhoto } from '../lib/photoQueue';
 
 interface Props {
   featureType?: string;
@@ -37,6 +39,39 @@ export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
   };
 
   useEffect(loadPhotos, [featureId]);
+
+  // PT28 — photos for this feature still on the device, shown from their local bytes.
+  // Polled, so a queued thumbnail turns into a server one once the queue drains.
+  const [queued, setQueued] = useState<{ id: string; url: string; failed: boolean }[]>([]);
+  const [queueTick, setQueueTick] = useState(0);
+  useEffect(() => {
+    if (!featureId) return;
+    let urls: string[] = [];
+    let cancelled = false;
+    void db.photoQueue
+      .where('featureId')
+      .equals(featureId)
+      .toArray()
+      .then((rows) => {
+        if (cancelled) return;
+        const next = rows.map((r) => ({ id: r.id, url: URL.createObjectURL(r.blob), failed: r.status === 'failed' }));
+        urls = next.map((q) => q.url);
+        setQueued(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      urls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [featureId, queueTick]);
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      setQueueTick((n) => n + 1);
+      loadPhotos();
+    }, 5000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [featureId]);
 
   const browserFix = (): Promise<{ lat: number; lng: number } | null> =>
     new Promise((resolve) => {
@@ -100,12 +135,54 @@ export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
         onUploaded?.();
       }
     } catch {
-      setStatus('Saved offline — will sync later');
+      // PT28 — this used to say "Saved offline" and keep nothing. Now it is true.
+      if (!featureId) {
+        setStatus('Offline, and this feature has no id yet: photo NOT saved.');
+        return;
+      }
+      const where = lat != null ? ` 📍 ${lat.toFixed(5)}, ${lng!.toFixed(5)}` : ' (no GPS)';
+      try {
+        const { queued: n } = await queuePhoto({
+          blob: file,
+          filename: file.name || 'photo.jpg',
+          featureType,
+          featureId,
+          lat,
+          lng,
+          takenAt: takenAt ?? new Date().toISOString(),
+        });
+        setStatus(`Queued (${n}) — will upload when back online${where}`);
+        setQueueTick((t) => t + 1);
+      } catch (err) {
+        setStatus(
+          err instanceof PhotoQueueFullError
+            ? err.message
+            : 'Offline, and the photo could not be stored on this device: NOT saved.',
+        );
+      }
     }
   };
 
   return (
     <div className="text-sm">
+      {queued.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2" data-testid="queued-photos">
+          {queued.map((q) => (
+            <span
+              key={q.id}
+              className="relative block"
+              title={q.failed ? 'Refused by the server — see Settings' : 'Waiting to upload'}
+            >
+              <img
+                src={q.url}
+                alt={q.failed ? 'photo refused by server' : 'photo waiting to upload'}
+                className={`h-14 w-14 rounded object-cover opacity-80 ring-2 ${q.failed ? 'ring-red-500' : 'ring-amber-400'}`}
+              />
+              <span className="absolute -right-1 -top-1 text-xs">{q.failed ? '⚠️' : '⏳'}</span>
+            </span>
+          ))}
+        </div>
+      )}
       {photos.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
           {photos.map((p) => (

@@ -1,5 +1,6 @@
 import { db, type PendingMutation } from './db';
 import { getWriteToken } from './auth';
+import { replayPhotoQueue } from './photoQueue';
 
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -68,11 +69,24 @@ export async function replayQueue(): Promise<SyncResult> {
   return { replayed, conflicts };
 }
 
+/** PT28 — how often queued photos are retried while the browser believes it is online. */
+export const PHOTO_RETRY_MS = 30_000;
+
 export function startAutoSync(): () => void {
+  // PT28 — photos drain after the JSON edits, but do not depend on them succeeding.
   const handler = () => {
-    void replayQueue();
+    void replayQueue()
+      .catch((err) => console.warn('[sync] edit replay failed', err))
+      .finally(() => void replayPhotoQueue().catch((err) => console.warn('[sync] photo replay failed', err)));
   };
   window.addEventListener('online', handler);
   if (navigator.onLine) handler();
-  return () => window.removeEventListener('online', handler);
+  // Weak signal often never flips navigator.onLine, so no 'online' event ever fires: retry on a timer.
+  const timer = window.setInterval(() => {
+    if (navigator.onLine) void replayPhotoQueue().catch(() => undefined);
+  }, PHOTO_RETRY_MS);
+  return () => {
+    window.removeEventListener('online', handler);
+    window.clearInterval(timer);
+  };
 }

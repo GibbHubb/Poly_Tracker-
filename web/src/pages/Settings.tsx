@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { db, pendingCount, queueMutation, type ConflictRecord } from '../lib/db';
+import { db, pendingCount, queueMutation, type ConflictRecord, type QueuedPhoto } from '../lib/db';
 import { replayQueue } from '../lib/sync';
+import { replayPhotoQueue } from '../lib/photoQueue';
 import { useAuthStore } from '../lib/auth';
 import { api, type GeoJsonFeature } from '../lib/api';
 import {
@@ -32,6 +33,7 @@ function fmtVal(field: string, v: unknown): string {
 export function Settings() {
   const [pending, setPending] = useState(0);
   const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
+  const [photoRows, setPhotoRows] = useState<QueuedPhoto[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const {
     writeToken,
@@ -55,6 +57,8 @@ export function Settings() {
       .reverse()
       .toArray()
       .then(setConflicts);
+    // PT28 — photos held on this device, waiting or refused.
+    void db.photoQueue.orderBy('createdAt').toArray().then(setPhotoRows);
   }, []);
   useEffect(refresh, [refresh]);
 
@@ -283,14 +287,15 @@ export function Settings() {
       <section className="rounded-lg border border-slate-800 p-4">
         <h2 className="mb-2 font-medium">Offline queue</h2>
         <p className="mb-3 text-sm text-slate-400">
-          {pending} mutation(s) waiting to sync.
+          {pending} change(s) and photo(s) waiting to sync.
         </p>
         <div className="flex gap-2">
           <button
             onClick={async () => {
               const r = await replayQueue();
+              const ph = await replayPhotoQueue();
               setMsg(
-                `Replayed ${r.replayed}, ${r.conflicts.length} conflict(s)`,
+                `Replayed ${r.replayed}, ${r.conflicts.length} conflict(s); photos uploaded ${ph.uploaded}, refused ${ph.failed}`,
               );
               refresh();
             }}
@@ -310,6 +315,50 @@ export function Settings() {
           </button>
         </div>
         {msg && <p className="mt-3 text-sm text-slate-400">{msg}</p>}
+        {photoRows.length > 0 && (
+          <div className="mt-4" data-testid="photo-queue">
+            <h3 className="mb-1 text-sm font-medium">Photos on this device</h3>
+            <p className="mb-2 text-xs text-slate-500">
+              "Clear queue" never deletes these: a photo may be the only copy.
+            </p>
+            <ul className="space-y-1 text-sm">
+              {photoRows.map((p) => (
+                <li key={p.id} className="flex items-center justify-between rounded bg-slate-800/60 px-3 py-1">
+                  <span>
+                    {p.status === 'failed' ? '⚠️ refused' : '⏳ waiting'} · {p.filename} ·{' '}
+                    {(p.blob.size / 1024).toFixed(0)} KB
+                    {p.lat != null ? ` · 📍 ${p.lat.toFixed(5)}, ${p.lng?.toFixed(5)}` : ' · no GPS'}
+                    {p.lastError ? ` · ${p.lastError}` : ''}
+                  </span>
+                  <span className="flex gap-2">
+                    {p.status === 'failed' && (
+                      <button
+                        className="rounded bg-slate-700 px-2 py-0.5 text-xs text-white"
+                        onClick={async () => {
+                          await db.photoQueue.update(p.id, { status: 'queued', lastError: undefined, serverErrors: 0 });
+                          await replayPhotoQueue();
+                          refresh();
+                        }}
+                      >
+                        Retry
+                      </button>
+                    )}
+                    <button
+                      className="rounded bg-red-900 px-2 py-0.5 text-xs text-white"
+                      onClick={async () => {
+                        if (!window.confirm('Delete this photo from the device? It has not been uploaded.')) return;
+                        await db.photoQueue.delete(p.id);
+                        refresh();
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       <section className="rounded-lg border border-slate-800 p-4">

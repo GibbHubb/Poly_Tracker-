@@ -126,6 +126,13 @@ export function errorHandler(
     res.status(err.status).json({ error: err.message });
     return;
   }
+  // PT26 — multer's size refusal used to fall through to a 500.
+  if ((err as { code?: string } | null)?.code === 'LIMIT_FILE_SIZE') {
+    res.status(413).json({
+      error: 'Photo is too large to upload (the limit is 4 MB). The app shrinks photos before sending; update the app if you see this.',
+    });
+    return;
+  }
   const message = err instanceof Error ? err.message : 'Internal Server Error';
   console.error('[api] unhandled error:', err);
   res.status(500).json({ error: message });

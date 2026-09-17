@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import exifr from 'exifr';
 import { db } from '../lib/db';
 import { PhotoQueueFullError, queuePhoto } from '../lib/photoQueue';
+import { downscalePhoto } from '../lib/downscale';
+import { getWriteToken } from '../lib/auth';
 
 interface Props {
   featureType?: string;
@@ -114,8 +116,19 @@ export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
       }
     }
 
+    // PT26 — shrink BEFORE upload or queueing: Vercel refuses bodies over ~4.5 MB, and a
+    // phone photo is 3–8 MB. GPS and time above were read from the original file.
+    let upload: { blob: Blob; filename: string };
+    try {
+      setStatus('Preparing photo…');
+      upload = await downscalePhoto(file);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'This photo could not be prepared for upload.');
+      return;
+    }
+
     const form = new FormData();
-    form.append('photo', file);
+    form.append('photo', upload.blob, upload.filename);
     if (featureType) form.append('feature_type', featureType);
     if (featureId) form.append('feature_id', featureId);
     form.append('taken_at', takenAt ?? new Date().toISOString());
@@ -128,7 +141,14 @@ export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
       lat != null ? `Uploading (📍 ${lat.toFixed(5)}, ${lng!.toFixed(5)})…` : 'Uploading (no GPS)…',
     );
     try {
-      const res = await fetch(`${BASE}/photos`, { method: 'POST', body: form });
+      // Uploads are writes: send the write token like every other write (the queue replay
+      // already did). Without it a deployment with API_WRITE_TOKEN set refused every photo.
+      const token = getWriteToken();
+      const res = await fetch(`${BASE}/photos`, {
+        method: 'POST',
+        body: form,
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
       setStatus(res.ok ? 'Uploaded ✓' : `Failed (${res.status})`);
       if (res.ok) {
         loadPhotos();
@@ -143,8 +163,8 @@ export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
       const where = lat != null ? ` 📍 ${lat.toFixed(5)}, ${lng!.toFixed(5)}` : ' (no GPS)';
       try {
         const { queued: n } = await queuePhoto({
-          blob: file,
-          filename: file.name || 'photo.jpg',
+          blob: upload.blob,
+          filename: upload.filename,
           featureType,
           featureId,
           lat,

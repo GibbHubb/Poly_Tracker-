@@ -15,10 +15,17 @@ export const photosRouter = Router();
 const store = createPhotoStore();
 
 // Bytes come to us, not to a disk multer picked: the store decides where they
-// land. The 25 MB cap is unchanged, and now bounds an in-memory buffer.
+// land.
+//
+// PT26 — the cap was 25 MB, but on Vercel the PLATFORM refuses a request body over
+// ~4.5 MB before this code runs, so a real phone photo failed with a generic error
+// and none of our messaging. The web app now downscales before upload (~1600 px);
+// this cap sits under the platform limit so an oversize file is refused by US, with
+// a 413 that says why (see errorHandler).
+export const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+  limits: { fileSize: MAX_PHOTO_BYTES },
 });
 
 const metaInput = z.object({

@@ -155,10 +155,19 @@ export const api = {
         ? { headers: { 'If-Match': `"${baseVersion}"` } }
         : {}),
     }),
-  updatePolyRun: (farmId: string, id: string, f: Partial<GeoJsonFeature>) =>
+  // PT30 — poly runs joined the scheme; same If-Match contract as paddocks.
+  updatePolyRun: (
+    farmId: string,
+    id: string,
+    f: Partial<GeoJsonFeature>,
+    baseVersion?: number | null,
+  ) =>
     request<GeoJsonFeature>(`/farms/${farmId}/poly-runs/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(f),
+      ...(baseVersion != null
+        ? { headers: { 'If-Match': `"${baseVersion}"` } }
+        : {}),
     }),
   // PT18-fu2 — `baseVersion` becomes If-Match, so a stale edit gets a 412
   // rather than silently clobbering a newer one. Omit it to keep the old

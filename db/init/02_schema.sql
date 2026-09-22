@@ -30,7 +30,8 @@ CREATE TABLE poly_runs (
     installed_date date,
     color          text,
     notes          text,
-    created_at     timestamptz NOT NULL DEFAULT now()
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    version        integer NOT NULL DEFAULT 1  -- PT30 optimistic concurrency
 );
 
 CREATE TABLE features (

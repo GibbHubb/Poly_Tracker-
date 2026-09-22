@@ -59,7 +59,7 @@ export function setVersionETag(res: Response, version: number | undefined): void
  * merge without a second round trip.
  */
 export async function throwUpdateConflict(
-  table: 'farms' | 'paddocks' | 'features',
+  table: 'farms' | 'paddocks' | 'features' | 'poly_runs',
   // Express types route params as `string | string[]`; a path segment is
   // always singular in practice, so normalise here rather than casting at
   // every call site.

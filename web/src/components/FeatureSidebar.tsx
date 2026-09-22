@@ -21,8 +21,8 @@ export interface SidebarSelection {
   area_m2: number | null;
   // PT18-fu2 — the row version this selection was read at, sent back as
   // If-Match so a stale edit is refused with 412 instead of silently
-  // overwriting someone else's. Null for poly-runs, which have no version
-  // column (PT18-fu1 covered farms/paddocks/features only).
+  // overwriting someone else's. Poly runs carry one since PT30; null only for
+  // a row read before its version existed.
   version: number | null;
 }
 

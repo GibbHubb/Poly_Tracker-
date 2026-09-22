@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
+import { parseIfMatch, setVersionETag, throwUpdateConflict } from '../lib/concurrency.js';
 import { geometrySchema, rowsToCollection, rowToFeature } from '../lib/geojson.js';
 
 // mergeParams: mounted at /api/farms/:farmId/poly-runs
@@ -39,13 +40,15 @@ interface GeoRow {
   color: string | null;
   notes: string | null;
   created_at: string;
+  // PT30 — optimistic-concurrency version (001/002 migrations).
+  version: number;
   // Derived, read-only: ground length in metres (pg serialises as string).
   length_m: number | string | null;
 }
 
 const SELECT = `
   SELECT id, name, diameter_mm, depth_m, material, installed_date, color,
-         notes, created_at, ST_Length(geom::geography) AS length_m,
+         notes, created_at, version, ST_Length(geom::geography) AS length_m,
          ST_AsGeoJSON(geom) AS geojson
     FROM poly_runs WHERE farm_id = $1`;
 
@@ -111,7 +114,7 @@ polyRunsRouter.post(
           color, notes, geom)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8, ST_SetSRID(ST_GeomFromGeoJSON($9), 4326))
        RETURNING id, name, diameter_mm, depth_m, material, installed_date,
-                 color, notes, created_at,
+                 color, notes, created_at, version,
                  ST_Length(geom::geography) AS length_m,
                  ST_AsGeoJSON(geom) AS geojson`,
       [
@@ -135,6 +138,8 @@ polyRunsRouter.patch(
   asyncHandler(async (req, res) => {
     const body = featureInput.partial({ geometry: true }).parse(req.body);
     const p = body.properties ?? {};
+    // PT30 — no If-Match means no precondition, i.e. previous behaviour.
+    const expected = parseIfMatch(req);
     const { rows } = await query<GeoRow>(
       // Full-replace owned attributes (see features.ts); geometry COALESCE.
       `UPDATE poly_runs SET
@@ -145,10 +150,12 @@ polyRunsRouter.patch(
          installed_date = $7,
          color = $8,
          notes = $9,
-         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($10), 4326), geom)
+         geom = COALESCE(ST_SetSRID(ST_GeomFromGeoJSON($10), 4326), geom),
+         version = version + 1
        WHERE id = $1 AND farm_id = $2
+         AND ($11::int IS NULL OR version = $11)
        RETURNING id, name, diameter_mm, depth_m, material, installed_date,
-                 color, notes, created_at,
+                 color, notes, created_at, version,
                  ST_Length(geom::geography) AS length_m,
                  ST_AsGeoJSON(geom) AS geojson`,
       [
@@ -162,9 +169,16 @@ polyRunsRouter.patch(
         p.color ?? null,
         p.notes ?? null,
         body.geometry ? JSON.stringify(body.geometry) : null,
+        expected,
       ],
     );
-    if (rows.length === 0) throw new HttpError(404, 'Poly run not found');
+    if (rows.length === 0) {
+      if (expected !== null) {
+        await throwUpdateConflict('poly_runs', req.params.runId, expected, 'Poly run not found');
+      }
+      throw new HttpError(404, 'Poly run not found');
+    }
+    setVersionETag(res, rows[0]!.version);
     res.json(rowToFeature(rows[0]!));
   }),
 );

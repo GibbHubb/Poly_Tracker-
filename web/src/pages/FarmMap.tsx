@@ -257,11 +257,11 @@ export function FarmMap() {
             : `/farms/${farmId}/features/${id}`;
 
       try {
-        // PT18-fu2 — send the version this edit was based on. Poly-runs pass
-        // null (no version column), keeping their previous behaviour.
+        // PT18-fu2 — send the version this edit was based on (PT30: poly
+        // runs too, now that they carry one).
         if (kind === 'paddock') await api.updatePaddock(farmId, id, patch, version);
         else if (kind === 'polyRun')
-          await api.updatePolyRun(farmId, id, patch);
+          await api.updatePolyRun(farmId, id, patch, version);
         else await api.updateFeature(farmId, id, patch, version);
         await reload();
       } catch (err) {

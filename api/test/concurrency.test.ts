@@ -215,3 +215,48 @@ describe('features optimistic concurrency', () => {
     expect(created.body.properties.version).toBe(1);
   });
 });
+
+// PT30 — poly runs were the one editable object with no precondition.
+const LINE = { type: 'LineString', coordinates: [[150, -30], [150.001, -30.001]] };
+
+describe('poly runs optimistic concurrency', () => {
+  it('refuses a stale write with 412 and leaves the row untouched', async () => {
+    const farm = await makeFarm();
+    const created = await request(app)
+      .post(`/api/farms/${farm.id}/poly-runs`)
+      .send({ geometry: LINE, properties: { name: 'Run A', diameter_mm: 40 } });
+    expect(created.status).toBe(201);
+    expect(created.body.properties.version).toBe(1);
+    const id = created.body.id;
+
+    const first = await request(app)
+      .patch(`/api/farms/${farm.id}/poly-runs/${id}`)
+      .set('If-Match', '"1"')
+      .send({ properties: { name: 'Theirs', diameter_mm: 50 } });
+    expect(first.status).toBe(200);
+    expect(first.headers.etag).toBe('"2"');
+
+    const stale = await request(app)
+      .patch(`/api/farms/${farm.id}/poly-runs/${id}`)
+      .set('If-Match', '"1"')
+      .send({ properties: { name: 'Mine', diameter_mm: 63 } });
+    expect(stale.status).toBe(412);
+
+    const after = await request(app).get(`/api/farms/${farm.id}/poly-runs/${id}`);
+    expect(after.body.properties.name).toBe('Theirs');
+    expect(after.body.properties.diameter_mm).toBe(50);
+    expect(after.body.properties.version).toBe(2);
+  });
+
+  it('omitting If-Match keeps last-write-wins and still bumps the version', async () => {
+    const farm = await makeFarm();
+    const created = await request(app)
+      .post(`/api/farms/${farm.id}/poly-runs`)
+      .send({ geometry: LINE, properties: { name: 'Run B' } });
+    const res = await request(app)
+      .patch(`/api/farms/${farm.id}/poly-runs/${created.body.id}`)
+      .send({ properties: { name: 'Run B2' } });
+    expect(res.status).toBe(200);
+    expect(res.body.properties.version).toBe(2);
+  });
+});

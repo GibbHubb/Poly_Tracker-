@@ -63,3 +63,15 @@ CREATE INDEX features_geom_gist  ON features  USING GIST (geom);
 CREATE INDEX paddocks_farm_idx  ON paddocks  (farm_id);
 CREATE INDEX poly_runs_farm_idx ON poly_runs (farm_id);
 CREATE INDEX features_farm_idx  ON features  (farm_id);
+
+-- PT31 — photos had no index at all (every lookup was a seq scan), and the
+-- three farm_id indexes above are single-column while every list query
+-- filters AND sorts (`WHERE farm_id = $1 ORDER BY created_at`). See
+-- db/migrations/003_photo_and_composite_indexes.sql for the full rationale;
+-- kept in sync here so a fresh install matches a migrated one.
+CREATE INDEX photos_feature_id_idx ON photos (feature_id);
+CREATE INDEX photos_taken_at_idx   ON photos (taken_at);
+
+CREATE INDEX paddocks_farm_created_idx  ON paddocks  (farm_id, created_at);
+CREATE INDEX poly_runs_farm_created_idx ON poly_runs (farm_id, created_at);
+CREATE INDEX features_farm_created_idx  ON features  (farm_id, created_at);

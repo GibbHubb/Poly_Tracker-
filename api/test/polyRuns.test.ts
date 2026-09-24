@@ -67,6 +67,47 @@ describe('poly-runs CRUD + geometry round-trip', () => {
     expect(Number(patch.body.properties.length_m)).toBeGreaterThan(0);
   });
 
+  it('GET with a bbox containing the run returns it (length_m unaffected)', async () => {
+    const farm = await createFarm();
+    const created = (
+      await request(app)
+        .post(`/api/farms/${farm.id}/poly-runs`)
+        .send({ type: 'Feature', geometry: LINE_GEOM, properties: { name: 'In' } })
+    ).body;
+
+    const res = await request(app)
+      .get(`/api/farms/${farm.id}/poly-runs`)
+      .query({ bbox: '151.5,-27.5,152.5,-26.5' });
+    expect(res.status).toBe(200);
+    expect(res.body.features).toHaveLength(1);
+    expect(Number(res.body.features[0].properties.length_m)).toBeCloseTo(
+      Number(created.properties.length_m),
+      2,
+    );
+  });
+
+  it('GET with a bbox that excludes the run returns an empty collection', async () => {
+    const farm = await createFarm();
+    await request(app)
+      .post(`/api/farms/${farm.id}/poly-runs`)
+      .send({ type: 'Feature', geometry: LINE_GEOM, properties: { name: 'Out' } });
+
+    const res = await request(app)
+      .get(`/api/farms/${farm.id}/poly-runs`)
+      .query({ bbox: '0,0,1,1' });
+    expect(res.status).toBe(200);
+    expect(res.body.features).toHaveLength(0);
+  });
+
+  it('GET with a malformed bbox is a 400, not a 500', async () => {
+    const farm = await createFarm();
+    const res = await request(app)
+      .get(`/api/farms/${farm.id}/poly-runs`)
+      .query({ bbox: 'nonsense' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('ValidationError');
+  });
+
   it('DELETE removes the poly-run', async () => {
     const farm = await createFarm();
     const created = (

@@ -89,6 +89,72 @@ describe('features CRUD + geometry round-trip', () => {
     expect(patch.status).toBe(200);
   });
 
+  it('GET with no bbox returns every feature (today\'s behaviour, byte-identical)', async () => {
+    const farm = await createFarm();
+    await request(app)
+      .post(`/api/farms/${farm.id}/features`)
+      .send({ type: 'Feature', geometry: POINT_GEOM, properties: { type: 'bore', name: 'In' } });
+
+    const noBbox = await request(app).get(`/api/farms/${farm.id}/features`);
+    expect(noBbox.status).toBe(200);
+    expect(noBbox.body.features).toHaveLength(1);
+  });
+
+  it('GET with a bbox containing the feature returns it', async () => {
+    const farm = await createFarm();
+    await request(app)
+      .post(`/api/farms/${farm.id}/features`)
+      .send({ type: 'Feature', geometry: POINT_GEOM, properties: { type: 'bore', name: 'In' } });
+
+    // POINT_GEOM is [152.0, -27.0]; a box that contains it.
+    const res = await request(app)
+      .get(`/api/farms/${farm.id}/features`)
+      .query({ bbox: '151.5,-27.5,152.5,-26.5' });
+    expect(res.status).toBe(200);
+    expect(res.body.features).toHaveLength(1);
+  });
+
+  it('GET with a bbox that excludes the feature returns an empty collection', async () => {
+    const farm = await createFarm();
+    await request(app)
+      .post(`/api/farms/${farm.id}/features`)
+      .send({ type: 'Feature', geometry: POINT_GEOM, properties: { type: 'bore', name: 'Out' } });
+
+    // Nowhere near POINT_GEOM.
+    const res = await request(app)
+      .get(`/api/farms/${farm.id}/features`)
+      .query({ bbox: '0,0,1,1' });
+    expect(res.status).toBe(200);
+    expect(res.body.features).toHaveLength(0);
+  });
+
+  it('GET with a malformed bbox (wrong count) is a 400, not a 500', async () => {
+    const farm = await createFarm();
+    const res = await request(app)
+      .get(`/api/farms/${farm.id}/features`)
+      .query({ bbox: '1,2,3' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('ValidationError');
+  });
+
+  it('GET with a malformed bbox (non-numeric) is a 400, not a 500', async () => {
+    const farm = await createFarm();
+    const res = await request(app)
+      .get(`/api/farms/${farm.id}/features`)
+      .query({ bbox: 'nonsense' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('ValidationError');
+  });
+
+  it('GET with an inverted bbox (west >= east) is a 400', async () => {
+    const farm = await createFarm();
+    const res = await request(app)
+      .get(`/api/farms/${farm.id}/features`)
+      .query({ bbox: '152.5,-27.5,151.5,-26.5' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('ValidationError');
+  });
+
   it('DELETE removes the feature', async () => {
     const farm = await createFarm();
     const created = (

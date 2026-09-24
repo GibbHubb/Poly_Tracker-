@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
 import { parseIfMatch, setVersionETag, throwUpdateConflict } from '../lib/concurrency.js';
-import { geometrySchema, rowsToCollection, rowToFeature } from '../lib/geojson.js';
+import { bboxPredicate, bboxSchema, geometrySchema, rowsToCollection, rowToFeature } from '../lib/geojson.js';
 
 // mergeParams: mounted at /api/farms/:farmId/poly-runs
 export const polyRunsRouter = Router({ mergeParams: true });
@@ -84,9 +84,10 @@ export async function insertPolyRunTx(
 polyRunsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const { rows } = await query<GeoRow>(`${SELECT} ORDER BY created_at`, [
-      req.params.farmId,
-    ]);
+    // PT31 — optional bbox; absent bbox keeps today's behaviour untouched.
+    const bbox = bboxSchema.parse(req.query.bbox);
+    const { sql: bboxSql, params } = bboxPredicate(bbox, 'geom', [req.params.farmId]);
+    const { rows } = await query<GeoRow>(`${SELECT}${bboxSql} ORDER BY created_at`, params);
     res.json(rowsToCollection(rows));
   }),
 );

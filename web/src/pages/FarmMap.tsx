@@ -24,7 +24,8 @@ import {
   type GeoJsonFeature,
   type GeoJsonFeatureCollection,
 } from '../lib/api';
-import { db, queueMutation } from '../lib/db';
+import { queueMutation } from '../lib/db';
+import { recordConflict } from '../lib/conflictNotice';
 import type { ImportPlan } from '../lib/importData';
 import { geometryCoords } from '../lib/geo';
 import { exportFarmPdf } from '../lib/exportPdf';
@@ -268,8 +269,9 @@ export function FarmMap() {
         // PT18-fu2 — a conflict is NOT an offline failure. Queuing it would
         // replay the very write the precondition just refused, so it goes to
         // the conflict store (where PT18's merge UI reads from) instead.
+        // PT40 — and says so on the map, with a way into the review.
         if (isConflictError(err)) {
-          await db.conflicts.put({
+          await recordConflict({
             id: crypto.randomUUID(),
             op: 'update',
             endpoint,

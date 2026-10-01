@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { db, pendingCount, queueMutation, type ConflictRecord, type QueuedPhoto } from '../lib/db';
 import { replayQueue } from '../lib/sync';
 import { replayPhotoQueue } from '../lib/photoQueue';
@@ -64,6 +65,11 @@ export function Settings() {
 
   const tokenSet = Boolean(import.meta.env.VITE_MAPBOX_TOKEN);
 
+  // PT40 — the conflict toast links here as /settings?conflict=<id>.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedConflict = searchParams.get('conflict');
+  const autoOpened = useRef<string | null>(null);
+
   // Re-apply a conflict as-is (PT15 blind replay) — used for create/other
   // conflicts that have no server record to diff against.
   const blindReapply = useCallback(
@@ -123,6 +129,18 @@ export function Settings() {
     },
     [blindReapply, refresh],
   );
+
+  // PT40 — open the review straight away for the conflict the toast linked to,
+  // once the log has loaded. The param is dropped so a reload does not reopen it.
+  useEffect(() => {
+    if (!requestedConflict || autoOpened.current === requestedConflict) return;
+    const c = conflicts.find((x) => x.id === requestedConflict);
+    if (!c) return;
+    autoOpened.current = requestedConflict;
+    setSearchParams({}, { replace: true });
+    if (c.payload === undefined) return;
+    void startReapply(c);
+  }, [requestedConflict, conflicts, startReapply, setSearchParams]);
 
   const toggleKeepServer = useCallback((field: string) => {
     setMerge((m) => {

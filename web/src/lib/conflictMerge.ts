@@ -11,7 +11,19 @@
 import type { GeoJsonFeature, GeoJsonGeometry } from './api';
 
 // Server-managed / derived keys that must never be diffed or sent in a PATCH.
-const IGNORED_KEYS = new Set(['id', 'created_at', 'area_m2', 'length_m', '_kind']);
+// PT40 — `version` and the timestamps are bookkeeping: they always differ on a
+// conflict (that is what a conflict is), so listing them offered the user a
+// "keep server" choice that means nothing. The merge pins the server version
+// through If-Match instead (Settings.confirmMerge).
+export const IGNORED_KEYS: ReadonlySet<string> = new Set([
+  'id',
+  'version',
+  'created_at',
+  'updated_at',
+  'area_m2',
+  'length_m',
+  '_kind',
+]);
 
 /** Sentinel field name for the geometry row in a diff. */
 export const GEOMETRY_FIELD = '__geometry__';

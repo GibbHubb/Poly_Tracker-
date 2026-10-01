@@ -5,6 +5,7 @@ import { FarmMap } from './pages/FarmMap';
 import { Settings } from './pages/Settings';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { startAutoSync } from './lib/sync';
+import { ConflictToast } from './components/ConflictToast';
 
 function StatusBadge() {
   const { online, pending } = useOnlineStatus();
@@ -47,6 +48,7 @@ export default function App() {
                 <Route path="/settings" element={<Settings />} />
               </Routes>
             </main>
+            <ConflictToast />
           </div>
         }
       />

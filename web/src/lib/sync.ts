@@ -1,6 +1,7 @@
 import { db, type PendingMutation } from './db';
 import { getWriteToken } from './auth';
 import { replayPhotoQueue } from './photoQueue';
+import { recordConflict } from './conflictNotice';
 
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -44,7 +45,8 @@ export async function replayQueue(): Promise<SyncResult> {
         } else if (res.status === 409 || res.status === 412) {
           console.warn('[sync] server-wins conflict, dropping', m.id);
           conflicts.push(m);
-          await db.conflicts.put({
+          // PT40 — recordConflict also raises the on-screen notice.
+          await recordConflict({
             id: m.id,
             op: m.op,
             endpoint: m.endpoint,

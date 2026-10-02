@@ -14,6 +14,7 @@ import {
 import { CircleMode } from '../lib/circleMode';
 import { OfflineAreas } from './OfflineAreas';
 import { toSource } from '../lib/geo';
+import { CLUSTER_OPTIONS, IS_CLUSTER, NOT_CLUSTER } from '../lib/clusters';
 import { useAppStore } from '../lib/store';
 import { formatArea, formatLength } from '../lib/units';
 import turfLength from '@turf/length';
@@ -142,8 +143,12 @@ export function MapView({
     map.on('load', () => {
       map.addSource('saved-paddocks', { type: 'geojson', data: EMPTY });
       map.addSource('saved-polyruns', { type: 'geojson', data: EMPTY });
-      map.addSource('saved-features', { type: 'geojson', data: EMPTY });
-      map.addSource('saved-photos', { type: 'geojson', data: EMPTY });
+      // PT32 — the two point sources cluster below paddock zoom (lib/clusters.ts).
+      // A cluster counts its PT29 pending (queued, unsynced) members, so one
+      // still shows amber when a pending point is folded into it.
+      const clusterProperties = { pending: ['+', ['case', PENDING, 1, 0]] };
+      map.addSource('saved-features', { type: 'geojson', data: EMPTY, ...CLUSTER_OPTIONS, clusterProperties });
+      map.addSource('saved-photos', { type: 'geojson', data: EMPTY, ...CLUSTER_OPTIONS });
 
       map.addLayer({
         id: 'saved-paddocks-fill',
@@ -193,6 +198,7 @@ export function MapView({
         id: 'saved-features-circle',
         type: 'circle',
         source: 'saved-features',
+        filter: NOT_CLUSTER as unknown as maplibregl.FilterSpecification,
         paint: {
           'circle-radius': 6,
           'circle-color': ['coalesce', ['get', 'color'], '#38bdf8'],
@@ -206,6 +212,7 @@ export function MapView({
         id: 'saved-photos-circle',
         type: 'circle',
         source: 'saved-photos',
+        filter: NOT_CLUSTER as unknown as maplibregl.FilterSpecification,
         paint: {
           'circle-radius': 7,
           'circle-color': '#fbbf24',
@@ -213,6 +220,58 @@ export function MapView({
           'circle-stroke-width': 2,
         },
       });
+      // PT32 — clusters: a disc sized by count, with the count on it. Points
+      // keep their own colours; a cluster takes the layer's default colour.
+      for (const [source, color, stroke] of [
+        ['saved-features', '#38bdf8', '#0f172a'],
+        ['saved-photos', '#fbbf24', '#1e293b'],
+      ] as const) {
+        map.addLayer({
+          id: `${source}-cluster`,
+          type: 'circle',
+          source,
+          filter: IS_CLUSTER as unknown as maplibregl.FilterSpecification,
+          paint: {
+            'circle-color': color,
+            'circle-opacity': 0.85,
+            'circle-stroke-color': ['case', ['>', ['coalesce', ['get', 'pending'], 0], 0], '#fbbf24', stroke],
+            'circle-stroke-width': ['case', ['>', ['coalesce', ['get', 'pending'], 0], 0], 3, 2],
+            'circle-radius': ['step', ['get', 'point_count'], 14, 25, 18, 100, 22, 500, 27],
+          },
+        });
+        map.addLayer({
+          id: `${source}-cluster-count`,
+          type: 'symbol',
+          source,
+          filter: IS_CLUSTER as unknown as maplibregl.FilterSpecification,
+          layout: {
+            'text-field': ['get', 'point_count_abbreviated'],
+            'text-font': ['Open Sans Bold'],
+            'text-size': 12,
+            'text-allow-overlap': true,
+          },
+          paint: { 'text-color': '#0f172a' },
+        });
+        // Click a cluster → zoom to where it splits.
+        map.on('click', `${source}-cluster`, (e: maplibregl.MapLayerMouseEvent) => {
+          const f = e.features?.[0];
+          const id = f?.properties?.cluster_id as number | undefined;
+          if (!f || id === undefined || f.geometry.type !== 'Point') return;
+          // Mid-draw, a click is a vertex, not a request to zoom.
+          if (draw.getMode() !== 'simple_select') return;
+          const center = f.geometry.coordinates as [number, number];
+          (map.getSource(source) as maplibregl.GeoJSONSource).getClusterExpansionZoom(id, (err, zoom) => {
+            if (err || zoom == null) return;
+            map.easeTo({ center, zoom });
+          });
+        });
+        map.on('mouseenter', `${source}-cluster`, () => {
+          map.getCanvas().style.cursor = 'pointer';
+        });
+        map.on('mouseleave', `${source}-cluster`, () => {
+          map.getCanvas().style.cursor = '';
+        });
+      }
       // Name/type text labels (PT8). Require the style's `glyphs` source.
       // minzoom keeps them to paddock scale so they don't crowd the region view.
       map.addLayer({
@@ -252,6 +311,7 @@ export function MapView({
         id: 'saved-features-label',
         type: 'symbol',
         source: 'saved-features',
+        filter: NOT_CLUSTER as unknown as maplibregl.FilterSpecification,
         minzoom: 12,
         layout: {
           // Name on top, type (smaller) beneath when present.
@@ -406,6 +466,8 @@ export function MapView({
       'visibility',
       vis(visibleLayers.features),
     );
+    map.setLayoutProperty('saved-features-cluster', 'visibility', vis(visibleLayers.features));
+    map.setLayoutProperty('saved-features-cluster-count', 'visibility', vis(visibleLayers.features));
     map.setLayoutProperty('pending-paddocks-dash', 'visibility', vis(visibleLayers.paddocks));
     map.setLayoutProperty('pending-polyruns-dash', 'visibility', vis(visibleLayers.polyRuns));
     // Labels (PT8): gated by the master Labels flag AND the matching layer's

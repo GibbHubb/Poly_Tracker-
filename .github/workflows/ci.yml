@@ -60,6 +60,11 @@ jobs:
         run: npm run test:coverage
         working-directory: web
 
+      # PT32 — no emitted script over 700 kB (scripts/check-bundle-budget.mjs).
+      - name: Web bundle budget
+        run: npm run check:bundle
+        working-directory: web
+
       # API
       - name: Install api deps
         run: npm ci

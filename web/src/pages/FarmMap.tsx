@@ -27,6 +27,7 @@ import { queueMutation } from '../lib/db';
 import { recordConflict } from '../lib/conflictNotice';
 import type { ImportPlan } from '../lib/importData';
 import { geometryCoords } from '../lib/geo';
+import { withClustersOff } from '../lib/clusters';
 import { formatArea, formatLength } from '../lib/units';
 import { useFarmData } from '../hooks/useFarmData';
 import { forExport } from '../lib/pendingOverlay';
@@ -392,7 +393,8 @@ export function FarmMap() {
     if (!map) throw new Error('Map not ready');
     // PT32 — jsPDF + html2canvas (~380 KB) load only when Export is pressed.
     const { exportFarmPdf } = await import('../lib/exportPdf');
-    await exportFarmPdf({ map, farm, ...exportCollections });
+    // PT32 — the PDF shows every marker, not the on-screen clusters.
+    await withClustersOff(map, () => exportFarmPdf({ map, farm, ...exportCollections }));
   }, [farm, exportCollections]);
 
   const handleImport = useCallback(

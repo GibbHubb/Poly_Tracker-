@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { GeoJsonFeature, GeoJsonFeatureCollection } from '../lib/api';
 import { FEATURE_COLORS, PALETTE } from '../lib/mapStyle';
 import { formatArea, formatLength } from '../lib/units';
 import { POINT_TYPES, type DrawKind, type PointType } from './FeatureDialog';
 import { isPendingFeature } from '../lib/pendingOverlay';
+import { ROW_PITCH, WINDOW_FROM, windowRange } from '../lib/windowRange';
 
 export interface SidebarSelection {
   kind: DrawKind;
@@ -92,6 +93,9 @@ export function FeatureSidebar({
 }: Props) {
   const [search, setSearch] = useState('');
   const [activeTypes, setActiveTypes] = useState<Set<PointType>>(new Set());
+  // PT32 — the scroll container the windowed lists measure against. State, not
+  // a ref, so the lists re-render once it exists.
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
 
   const q = search.trim().toLowerCase();
 
@@ -136,7 +140,7 @@ export function FeatureSidebar({
     visiblePoints.length === 0;
 
   return (
-    <aside className="w-72 shrink-0 overflow-y-auto border-l border-slate-800 bg-slate-900 p-4 text-sm">
+    <aside ref={setScrollEl} className="w-72 shrink-0 overflow-y-auto border-l border-slate-800 bg-slate-900 p-4 text-sm">
       <SearchBar value={search} onChange={setSearch} />
       <TypeChips active={activeTypes} onToggle={toggleType} />
 
@@ -145,11 +149,12 @@ export function FeatureSidebar({
       ) : (
         <>
           <Section title={`Paddocks (${visiblePaddocks.length})`}>
-            {visiblePaddocks.map((f) => {
+            <WindowedRows items={visiblePaddocks} scrollEl={scrollEl} render={(f, style) => {
               const s = selectionOf('paddock', f);
               return (
                 <Row
                   key={f.id}
+                  style={style}
                   label={s.name || 'Unnamed'}
                   color={s.color}
                   meta={formatArea(s.area_m2) || undefined}
@@ -157,11 +162,11 @@ export function FeatureSidebar({
                   onClick={() => onSelect(s)}
                 />
               );
-            })}
+            }} />
           </Section>
 
           <Section title={`Poly runs (${visiblePolyRuns.length})`}>
-            {visiblePolyRuns.map((f) => {
+            <WindowedRows items={visiblePolyRuns} scrollEl={scrollEl} render={(f, style) => {
               const s = selectionOf('polyRun', f);
               const meta = [
                 formatLength(s.length_m),
@@ -172,6 +177,7 @@ export function FeatureSidebar({
               return (
                 <Row
                   key={f.id}
+                  style={style}
                   label={s.name || 'Unnamed'}
                   color={s.color}
                   meta={meta || undefined}
@@ -179,15 +185,16 @@ export function FeatureSidebar({
                   onClick={() => onSelect(s)}
                 />
               );
-            })}
+            }} />
           </Section>
 
           <Section title={`Points (${visiblePoints.length})`}>
-            {visiblePoints.map((f) => {
+            <WindowedRows items={visiblePoints} scrollEl={scrollEl} render={(f, style) => {
               const s = selectionOf('feature', f);
               return (
                 <Row
                   key={f.id}
+                  style={style}
                   label={s.name || s.type}
                   color={s.color}
                   meta={s.type}
@@ -195,7 +202,7 @@ export function FeatureSidebar({
                   onClick={() => onSelect(s)}
                 />
               );
-            })}
+            }} />
           </Section>
         </>
       )}
@@ -265,13 +272,74 @@ function Section({
   children,
 }: {
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <section className="mb-5">
       <h3 className="mb-2 font-semibold text-slate-300">{title}</h3>
-      <ul className="space-y-1">{children}</ul>
+      {children}
     </section>
+  );
+}
+
+/**
+ * PT32 — renders only the rows that intersect the sidebar's scroll viewport
+ * (plus an overscan), absolutely positioned inside a spacer of the full list
+ * height, so a farm with 5,000 points mounts a few dozen buttons instead of
+ * 5,000. The three lists share one scroll container, so each measures its own
+ * offset within it rather than owning a scroller. Short lists are unchanged.
+ * Known trade-off: Tab reaches only mounted rows; past the window, scroll or
+ * use the search box (which is what a 5,000-row list needs anyway).
+ */
+function WindowedRows({
+  items,
+  scrollEl,
+  render,
+}: {
+  items: GeoJsonFeature[];
+  scrollEl: HTMLElement | null;
+  render: (f: GeoJsonFeature, style?: CSSProperties) => ReactNode;
+}) {
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const [range, setRange] = useState<[number, number]>([0, 40]);
+  const windowed = items.length >= WINDOW_FROM;
+  const count = items.length;
+
+  // Re-measure on scroll and on resize of the scroller…
+  const measure = useRef<() => void>(() => {});
+  measure.current = () => {
+    const list = listRef.current;
+    if (!windowed || !scrollEl || !list) return;
+    // Distance from the top of the visible scroll area to the list's top.
+    const top = list.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top;
+    const next = windowRange(top, scrollEl.clientHeight, count);
+    setRange((prev) => (prev[0] === next[0] && prev[1] === next[1] ? prev : next));
+  };
+  useLayoutEffect(() => {
+    if (!windowed || !scrollEl) return;
+    const update = () => measure.current();
+    scrollEl.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    ro?.observe(scrollEl);
+    return () => {
+      scrollEl.removeEventListener('scroll', update);
+      ro?.disconnect();
+    };
+  }, [windowed, scrollEl]);
+  // …and after every render: a section above this one can grow or shrink
+  // (an import, a sync) and move this list with no scroll event at all. The
+  // equality guard in setRange makes the no-change case free.
+  useLayoutEffect(() => measure.current());
+
+  if (!windowed) return <ul className="space-y-1">{items.map((f) => render(f))}</ul>;
+
+  const [a, b] = range;
+  return (
+    <ul ref={listRef} className="relative" style={{ height: count * ROW_PITCH }}>
+      {items.slice(a, b).map((f, k) =>
+        render(f, { position: 'absolute', left: 0, right: 0, top: (a + k) * ROW_PITCH, height: ROW_PITCH }),
+      )}
+    </ul>
   );
 }
 
@@ -280,8 +348,11 @@ function Row({
   meta,
   color,
   pending,
+  style,
   onClick,
 }: {
+  /** PT32 — position inside a windowed list; absent in a plain one. */
+  style?: CSSProperties;
   label: string;
   meta?: string;
   color?: string;
@@ -290,7 +361,7 @@ function Row({
   onClick: () => void;
 }) {
   return (
-    <li>
+    <li style={style}>
       <button
         onClick={onClick}
         disabled={pending}

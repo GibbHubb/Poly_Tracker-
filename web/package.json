@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
+    "check:bundle": "node scripts/check-bundle-budget.mjs",
     "test:run": "vitest run",
     "test": "vitest",
     "test:coverage": "vitest run --coverage"

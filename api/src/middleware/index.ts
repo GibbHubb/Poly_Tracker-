@@ -1,6 +1,7 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { ZodError } from 'zod';
+import { log, routeShape } from './observability.js';
 
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
@@ -111,10 +112,21 @@ export class HttpError extends Error {
   }
 }
 
+/**
+ * PT35 — what the CALLER may see vs what the LOG gets.
+ *
+ * Our own errors (HttpError, ZodError, the 413) keep their bodies: they are
+ * messages we wrote, and some are load-bearing UI text (PT23's 503, PT18's
+ * 412). Anything else is an error we did not anticipate, and its `message` is
+ * whatever the library put there — for `pg` that names tables, columns,
+ * constraints and sometimes the host. That used to be returned verbatim, to an
+ * unauthenticated GET. Now the log keeps all of it and the caller gets a
+ * generic sentence plus the request id that finds it in the log.
+ */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function errorHandler(
   err: unknown,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction,
 ): void {
@@ -133,7 +145,56 @@ export function errorHandler(
     });
     return;
   }
-  const message = err instanceof Error ? err.message : 'Internal Server Error';
-  console.error('[api] unhandled error:', err);
-  res.status(500).json({ error: message });
+  const requestId = String(res.locals.requestId ?? '');
+  // body-parser's own refusals carry a status; they used to fall through to a 500.
+  const bodyErr = (err as { type?: unknown; status?: unknown } | null) ?? {};
+  if (bodyErr.type === 'entity.parse.failed') {
+    res.status(400).json({ error: 'Request body is not valid JSON.', requestId });
+    return;
+  }
+  if (bodyErr.type === 'entity.too.large') {
+    res.status(413).json({ error: 'Request body is too large.', requestId });
+    return;
+  }
+  // Any other refusal that already carries a 4xx (unsupported encoding, aborted
+  // request): keep its status, never its text.
+  if (typeof bodyErr.status === 'number' && bodyErr.status >= 400 && bodyErr.status < 500) {
+    res.status(bodyErr.status).json({ error: 'The request could not be read.', requestId });
+    return;
+  }
+  const code = (err as { code?: unknown } | null)?.code;
+  const pgCode = typeof code === 'string' ? code : undefined;
+  res.locals.errorCode = pgCode;
+  // Caller mistakes (mapped to 4xx below) are logged at warn; they are not our fault.
+  const callerFault = pgCode === '22P02' || pgCode === '23503';
+  log({
+    level: callerFault ? 'warn' : 'error',
+    msg: 'unhandled error',
+    requestId,
+    method: req.method,
+    path: routeShape(req.originalUrl),
+    code: pgCode,
+    error: err instanceof Error ? err.message : String(err),
+    stack: callerFault ? undefined : err instanceof Error ? err.stack : undefined,
+  });
+  // 22P02 = invalid_text_representation: a malformed id in the URL or body
+  // (e.g. /api/farms/not-a-uuid). That is the caller's mistake, not ours.
+  if (pgCode === '22P02') {
+    res.status(400).json({ error: 'Malformed identifier or value.', requestId });
+    return;
+  }
+  // 23503 = foreign_key_violation: the farm/feature this row points at does not
+  // exist (deleted elsewhere, or a bad id). A 404, not a 500: a 5xx is "try again
+  // later", and the offline queue would replay this one forever.
+  if (pgCode === '23503') {
+    res.status(404).json({
+      error: 'The farm or record this refers to does not exist (it may have been deleted).',
+      requestId,
+    });
+    return;
+  }
+  res.status(500).json({
+    error: 'Something went wrong on the server. Quote the request id if you report it.',
+    requestId,
+  });
 }

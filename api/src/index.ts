@@ -8,24 +8,45 @@ import { featuresRouter } from './routes/features.js';
 import { photosRouter } from './routes/photos.js';
 import { importRouter } from './routes/import.js';
 import { errorHandler, requireToken } from './middleware/index.js';
+import { accessLog, healthStats, log, requestId } from './middleware/observability.js';
 import { query } from './db.js';
 
 export const app = express();
-app.use(cors());
+// PT35 — before everything else, so even a body-parser refusal has an id and a log line.
+app.use(requestId);
+app.use(accessLog);
+app.use(cors({ exposedHeaders: ['x-request-id'] }));
 app.use(express.json({ limit: '5mb' }));
 
 // PT22: this check MUST touch the database. It previously returned a hardcoded
 // {ok:true}, so when Render deleted the free Postgres the service still reported
 // healthy for days while every data route was dead.
+//
+// PT35 — it also answers "what has been failing" without a dashboard login:
+// counters and the last few 5xx (ids, route shapes and SQLSTATE codes, never
+// messages, because this endpoint is public). Scoped to THIS function instance
+// since its start, and it says so; the full text is in the log under the id.
 app.get('/api/health', async (_req, res) => {
   try {
     await query('SELECT 1');
-    res.json({ ok: true, db: 'up' });
+    res.json({ ok: true, db: 'up', ...healthStats() });
   } catch (err) {
+    // The raw message names the database host; it goes to the log, not the caller.
+    const code = (err as { code?: unknown } | null)?.code;
+    log({
+      level: 'error',
+      msg: 'health: database unreachable',
+      requestId: String(res.locals.requestId ?? ''),
+      code: typeof code === 'string' ? code : undefined,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // No `code` either (ECONNREFUSED/ENOTFOUND says why); that is in the log.
     res.status(503).json({
       ok: false,
       db: 'down',
-      error: err instanceof Error ? err.message : String(err),
+      error: 'Database unreachable.',
+      requestId: res.locals.requestId,
+      ...healthStats(),
     });
   }
 });

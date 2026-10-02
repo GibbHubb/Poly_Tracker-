@@ -88,13 +88,16 @@ export function isConflictError(err: unknown): boolean {
 }
 
 /**
- * PT29 — how many API answers the service worker served from its cache instead
- * of the network (it marks them with `x-pt-from-cache`). A caller compares the
- * count before and after a load to know whether what it got is fresh.
+ * PT29 — per-call record of whether the service worker answered from its cache
+ * (it marks those answers `x-pt-from-cache`). Per call, not global: a global
+ * counter let an unrelated concurrent request (photo markers) mislabel a fresh
+ * farm load as cached.
  */
-export const apiCacheHits = { count: 0 };
+export interface RequestMeta {
+  fromCache: boolean;
+}
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, meta?: RequestMeta): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase();
   const isMutation = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
   // Mutations use the write token; GETs use the read token, falling back to
@@ -106,7 +109,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
   });
-  if (res.headers.get('x-pt-from-cache')) apiCacheHits.count += 1;
+  if (meta && res.headers.get('x-pt-from-cache')) meta.fromCache = true;
   if (!res.ok) {
     const text = await res.text();
     throw new ApiError(res.status, text);
@@ -118,6 +121,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   listFarms: () => request<Farm[]>('/farms'),
   getFarm: (id: string) => request<Farm>(`/farms/${id}`),
+  /**
+   * PT29 — the farm and its three collections in one go, plus whether ANY of
+   * the four answers came from the service worker's cache rather than the server.
+   */
+  loadFarm: async (farmId: string) => {
+    const meta: RequestMeta = { fromCache: false };
+    const [farm, paddocks, polyRuns, features] = await Promise.all([
+      request<Farm>(`/farms/${farmId}`, undefined, meta),
+      request<GeoJsonFeatureCollection>(`/farms/${farmId}/paddocks`, undefined, meta),
+      request<GeoJsonFeatureCollection>(`/farms/${farmId}/poly-runs`, undefined, meta),
+      request<GeoJsonFeatureCollection>(`/farms/${farmId}/features`, undefined, meta),
+    ]);
+    return { farm, paddocks, polyRuns, features, fromCache: meta.fromCache };
+  },
   /** GET a single record by its full relative path, e.g. /farms/x/paddocks/y.
    *  Used by the conflict-merge flow to fetch current server state. */
   getByPath: (path: string) => request<GeoJsonFeature>(path),

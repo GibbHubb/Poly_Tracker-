@@ -40,14 +40,22 @@ const flush = async (ms = 0) => {
   });
 };
 
+const bundle = (id: string, points: string[], fromCache = false) => ({
+  farm: farm(id),
+  paddocks: fc(),
+  polyRuns: fc(),
+  features: fc(...points),
+  fromCache,
+});
+
 /** Each farm's points come from `points[farmId]`, optionally delayed. */
 function stubApi(points: Record<string, string[]>, delay: Record<string, number> = {}) {
-  const wait = (id: string) => new Promise((r) => setTimeout(r, delay[id] ?? 0));
-  vi.spyOn(api, 'getFarm').mockImplementation(async (id) => (await wait(id), farm(id)));
-  vi.spyOn(api, 'listPaddocks').mockImplementation(async () => fc());
-  vi.spyOn(api, 'listPolyRuns').mockImplementation(async () => fc());
-  vi.spyOn(api, 'listFeatures').mockImplementation(async (id) => (await wait(id), fc(...(points[id] ?? []))));
+  return vi.spyOn(api, 'loadFarm').mockImplementation(async (id) => {
+    await new Promise((r) => setTimeout(r, delay[id] ?? 0));
+    return bundle(id, points[id] ?? []);
+  });
 }
+const failLoad = (err: unknown) => vi.spyOn(api, 'loadFarm').mockRejectedValue(err);
 
 beforeEach(async () => {
   await db.farmData.clear();
@@ -79,21 +87,18 @@ describe('useFarmData', () => {
   it('offline with a device copy: shows it, never calls the network', async () => {
     await db.farmData.put({ farmId: 'A', farm: farm('A'), paddocks: fc(), polyRuns: fc(), features: fc('cached'), fetchedAt: 123 });
     Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
-    stubApi({ A: ['network'] });
+    const load = stubApi({ A: ['network'] });
     act(() => root.render(<Probe farmId="A" />));
     await flush(20);
     expect(names()).toEqual(['cached']);
     expect(latest!.source).toBe('cache');
     expect(latest!.fetchedAt).toBe(123);
-    expect(api.listFeatures).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
   });
 
   it('offline, never seen: an explicit "no offline copy" message', async () => {
     Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
-    vi.spyOn(api, 'getFarm').mockRejectedValue(new TypeError('Failed to fetch'));
-    vi.spyOn(api, 'listPaddocks').mockRejectedValue(new TypeError('Failed to fetch'));
-    vi.spyOn(api, 'listPolyRuns').mockRejectedValue(new TypeError('Failed to fetch'));
-    vi.spyOn(api, 'listFeatures').mockRejectedValue(new TypeError('Failed to fetch'));
+    failLoad(new TypeError('Failed to fetch'));
     act(() => root.render(<Probe farmId="Z" />));
     await flush(20);
     expect(latest!.loadError).toMatch(/No offline copy of this farm/);
@@ -128,14 +133,11 @@ describe('useFarmData', () => {
   // Review finding 2: two reloads finishing out of order — only the newest lands.
   it('out-of-order reloads: the older answer does not overwrite the newer one', async () => {
     let call = 0;
-    vi.spyOn(api, 'getFarm').mockImplementation(async (id) => farm(id));
-    vi.spyOn(api, 'listPaddocks').mockImplementation(async () => fc());
-    vi.spyOn(api, 'listPolyRuns').mockImplementation(async () => fc());
-    vi.spyOn(api, 'listFeatures').mockImplementation(async () => {
+    vi.spyOn(api, 'loadFarm').mockImplementation(async (id) => {
       call += 1;
-      if (call === 2) return new Promise((r) => setTimeout(() => r(fc('stale')), 80));
-      if (call === 3) return fc('fresh');
-      return fc('initial');
+      if (call === 2) return new Promise((r) => setTimeout(() => r(bundle(id, ['stale'])), 80));
+      if (call === 3) return bundle(id, ['fresh']);
+      return bundle(id, ['initial']);
     });
     act(() => root.render(<Probe farmId="A" />));
     await flush(20);
@@ -155,10 +157,7 @@ describe('useFarmData', () => {
     [401, /not allowed/],
   ])('a %i on refresh with a device copy is reported, the copy still shown', async (status, msg) => {
     await db.farmData.put({ farmId: 'A', farm: farm('A'), paddocks: fc(), polyRuns: fc(), features: fc('cached'), fetchedAt: 1 });
-    vi.spyOn(api, 'getFarm').mockRejectedValue(new ApiError(status, '{}'));
-    vi.spyOn(api, 'listPaddocks').mockResolvedValue(fc());
-    vi.spyOn(api, 'listPolyRuns').mockResolvedValue(fc());
-    vi.spyOn(api, 'listFeatures').mockResolvedValue(fc());
+    failLoad(new ApiError(status, '{}'));
     act(() => root.render(<Probe farmId="A" />));
     await flush(30);
     expect(names()).toEqual(['cached']);
@@ -166,12 +165,12 @@ describe('useFarmData', () => {
   });
 
   it('the queue draining triggers ONE refresh, after it settles', async () => {
-    stubApi({ A: ['trough'] });
+    const load = stubApi({ A: ['trough'] });
     await queueMutation({ id: 'q1', op: 'delete', method: 'DELETE', endpoint: '/farms/A/features/x', payload: null });
     await queueMutation({ id: 'q2', op: 'delete', method: 'DELETE', endpoint: '/farms/A/features/y', payload: null });
     act(() => root.render(<Probe farmId="A" />));
     await flush(30);
-    const before = vi.mocked(api.listFeatures).mock.calls.length;
+    const before = load.mock.calls.length;
     await act(async () => {
       await db.pending.delete('q1');
     });
@@ -180,6 +179,64 @@ describe('useFarmData', () => {
       await db.pending.delete('q2');
     });
     await flush(DRAIN_REFRESH_MS + 100);
-    expect(vi.mocked(api.listFeatures).mock.calls.length - before).toBe(1);
+    expect(load.mock.calls.length - before).toBe(1);
+  });
+
+  // Re-review finding 2: a new edit queued inside the debounce window must not
+  // cancel the refresh owed to the rows that already drained.
+  it('drain, then a new edit queued within the window: the refresh still happens', async () => {
+    const load = stubApi({ A: ['trough'] });
+    await queueMutation({ id: 'q1', op: 'delete', method: 'DELETE', endpoint: '/farms/A/features/x', payload: null });
+    act(() => root.render(<Probe farmId="A" />));
+    await flush(30);
+    const before = load.mock.calls.length;
+    await act(async () => {
+      await db.pending.delete('q1');
+    });
+    await flush(50);
+    await act(async () => {
+      await queueMutation({ id: 'q3', op: 'delete', method: 'DELETE', endpoint: '/farms/A/features/z', payload: null });
+    });
+    await flush(DRAIN_REFRESH_MS + 100);
+    expect(load.mock.calls.length - before).toBe(1);
+  });
+
+  // Re-review finding 3: a cache fallback while online is not "refreshing".
+  it('online, but the service worker answered from cache: labelled cache, reported, not stored', async () => {
+    vi.spyOn(api, 'loadFarm').mockResolvedValue(bundle('A', ['sw-copy'], true));
+    act(() => root.render(<Probe farmId="A" />));
+    await flush(30);
+    expect(names()).toEqual(['sw-copy']);
+    expect(latest!.source).toBe('cache');
+    expect(latest!.refreshError).toMatch(/Could not reach the server/);
+    expect(await db.farmData.get('A')).toBeUndefined();
+  });
+});
+
+// Re-review finding 1: the cache flag is per load, not a global counter.
+describe('api.loadFarm cache flag', () => {
+  const respond = (body: unknown, cached: boolean) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: cached
+        ? { 'x-pt-from-cache': '1', 'content-type': 'application/json' }
+        : { 'content-type': 'application/json' },
+    });
+  const answer = (cachedPart: string) =>
+    vi.fn(async (url: string) =>
+      url.endsWith('/farms/A') ? respond(farm('A'), cachedPart === 'farm') : respond(url.includes('/photos') ? [] : fc(), url.includes(cachedPart)),
+    );
+
+  it('a concurrent CACHED photo answer does not mark a fresh farm load as cached', async () => {
+    vi.stubGlobal('fetch', answer('/photos'));
+    const [loaded] = await Promise.all([api.loadFarm('A'), api.listPhotos({ farmId: 'A' })]);
+    expect(loaded.fromCache).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('any of its own four answers from cache marks it cached', async () => {
+    vi.stubGlobal('fetch', answer('/features'));
+    expect((await api.loadFarm('A')).fromCache).toBe(true);
+    vi.unstubAllGlobals();
   });
 });

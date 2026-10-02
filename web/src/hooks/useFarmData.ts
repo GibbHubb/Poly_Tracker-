@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { liveQuery } from 'dexie';
-import { api, apiCacheHits, type GeoJsonFeatureCollection } from '../lib/api';
+import { api, type GeoJsonFeatureCollection } from '../lib/api';
 import { db, type CachedFarmData, type PendingMutation } from '../lib/db';
 import { applyPending, pendingForFarm, type FarmCollections } from '../lib/pendingOverlay';
 import { describeError, isNetworkError } from '../lib/notify';
@@ -42,18 +42,8 @@ export interface FarmData extends FarmCollections {
 }
 
 async function fetchFarm(farmId: string): Promise<{ data: CachedFarmData; fromCache: boolean }> {
-  const before = apiCacheHits.count;
-  const [farm, paddocks, polyRuns, features] = await Promise.all([
-    api.getFarm(farmId),
-    api.listPaddocks(farmId),
-    api.listPolyRuns(farmId),
-    api.listFeatures(farmId),
-  ]);
-  return {
-    data: { farmId, farm, paddocks, polyRuns, features, fetchedAt: Date.now() },
-    // Conservative: any cache hit during these four requests marks the set as cached.
-    fromCache: apiCacheHits.count !== before,
-  };
+  const { farm, paddocks, polyRuns, features, fromCache } = await api.loadFarm(farmId);
+  return { data: { farmId, farm, paddocks, polyRuns, features, fetchedAt: Date.now() }, fromCache };
 }
 
 function refreshFailedText(err: unknown): string {
@@ -92,6 +82,9 @@ export function useFarmData(farmId: string): FarmData {
       setSnap({ ...data, fetchedAt: prev });
       setSource('cache');
       setLoadError(null);
+      // Online but the server did not answer in time: say so, rather than a
+      // banner promising a refresh that is not happening.
+      if (!offline) setRefreshError(refreshFailedText(new TypeError('cache fallback')));
       return;
     }
     setSnap(data);
@@ -151,17 +144,33 @@ export function useFarmData(farmId: string): FarmData {
   // When this farm's queued edits drain, the server has them: fetch the real rows
   // so the overlay copy is replaced, not lost. Debounced: a replay deletes queue
   // rows one by one, and one refresh after it settles beats one per row racing.
+  //
+  // The timer lives in a ref and is only ever RESET by a further drain, never
+  // cancelled by the queue growing (review finding: a new edit queued within the
+  // debounce window used to cancel the refresh for the rows that had drained).
   const mineCount = pendingForFarm(pending, farmId);
   const prev = useRef({ farmId, count: mineCount });
+  const drainTimer = useRef<number | null>(null);
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
   useEffect(() => {
     const was = prev.current;
     prev.current = { farmId, count: mineCount };
     if (was.farmId !== farmId || mineCount >= was.count) return;
-    const t = window.setTimeout(() => {
-      reload().catch((err: unknown) => setRefreshError(refreshFailedText(err)));
+    if (drainTimer.current !== null) window.clearTimeout(drainTimer.current);
+    drainTimer.current = window.setTimeout(() => {
+      drainTimer.current = null;
+      reloadRef.current().catch((err: unknown) => setRefreshError(refreshFailedText(err)));
     }, DRAIN_REFRESH_MS);
-    return () => window.clearTimeout(t);
-  }, [mineCount, farmId, reload]);
+  }, [mineCount, farmId]);
+  // Only leaving the farm (or unmounting) cancels a scheduled refresh.
+  useEffect(
+    () => () => {
+      if (drainTimer.current !== null) window.clearTimeout(drainTimer.current);
+      drainTimer.current = null;
+    },
+    [farmId],
+  );
 
   const shown = useMemo(
     () => applyPending(snap ?? EMPTY_BASE, pending, farmId),

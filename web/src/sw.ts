@@ -98,6 +98,10 @@ registerRoute(
       {
         cachedResponseWillBeUsed: async ({ cachedResponse }) => {
           if (!cachedResponse) return null;
+          // Opaque (status 0) or null-body responses cannot be rebuilt; pass them through.
+          if (cachedResponse.status === 0 || [204, 205, 304].includes(cachedResponse.status)) {
+            return cachedResponse;
+          }
           const headers = new Headers(cachedResponse.headers);
           headers.set('x-pt-from-cache', '1');
           return new Response(await cachedResponse.blob(), {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import { MapView } from '../components/MapView';
@@ -381,19 +381,19 @@ export function FarmMap() {
     await refreshAfterWrite();
   }, [editing, farmId, refreshAfterWrite]);
 
+  // Exports carry what the user sees, minus the internal pending markers (PT29).
+  const exportCollections = useMemo(
+    () => ({ paddocks: forExport(paddocks), polyRuns: forExport(polyRuns), features: forExport(features) }),
+    [paddocks, polyRuns, features],
+  );
+
   const handleExport = useCallback(async () => {
     const map = mapRef.current;
     if (!map) throw new Error('Map not ready');
     // PT32 — jsPDF + html2canvas (~380 KB) load only when Export is pressed.
     const { exportFarmPdf } = await import('../lib/exportPdf');
-    await exportFarmPdf({
-      map,
-      farm,
-      paddocks: forExport(paddocks),
-      polyRuns: forExport(polyRuns),
-      features: forExport(features),
-    });
-  }, [farm, paddocks, polyRuns, features]);
+    await exportFarmPdf({ map, farm, ...exportCollections });
+  }, [farm, exportCollections]);
 
   const handleImport = useCallback(
     async (plan: ImportPlan) => {
@@ -593,9 +593,9 @@ export function FarmMap() {
           <DataIoControls
             farmId={farmId}
             farmName={farm?.name ?? 'farm'}
-            paddocks={forExport(paddocks)}
-            polyRuns={forExport(polyRuns)}
-            features={forExport(features)}
+            paddocks={exportCollections.paddocks}
+            polyRuns={exportCollections.polyRuns}
+            features={exportCollections.features}
             onImport={handleImport}
             onServerImportComplete={() => void refreshAfterWrite()}
           />

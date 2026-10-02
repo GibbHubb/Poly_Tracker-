@@ -51,6 +51,12 @@ jobs:
         run: npm run build
         working-directory: web
 
+      # PT36 — the web suite (offline queue, conflict merge, Dexie upgrade,
+      # geometry) with a coverage floor that only ratchets up (vitest.config.ts).
+      - name: Web tests + coverage floor
+        run: npm run test:coverage
+        working-directory: web
+
       # API
       - name: Install api deps
         run: npm ci

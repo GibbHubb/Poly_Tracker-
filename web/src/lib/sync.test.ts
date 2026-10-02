@@ -78,3 +78,57 @@ describe('notice helpers', () => {
     expect(conflictReviewPath('a b')).toBe('/settings?conflict=a%20b');
   });
 });
+
+// PT36 — the replay's own contract: drains in order, replays against the
+// version the edit was made on, and keeps the queue when the network drops.
+describe('replayQueue contract', () => {
+  it('drains oldest-first, emits If-Match only for edits with a base version, and empties the queue', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return new Response('{}', { status: 200 });
+      }),
+    );
+    await queueMutation({ id: 'a', op: 'create', method: 'POST', endpoint: '/farms/f/features', payload: { n: 1 } });
+    await new Promise((r) => setTimeout(r, 2));
+    await queueMutation({ id: 'b', op: 'update', method: 'PATCH', endpoint: '/farms/f/paddocks/p', payload: {}, baseVersion: 7 });
+    await new Promise((r) => setTimeout(r, 2));
+    await queueMutation({ id: 'c', op: 'delete', method: 'DELETE', endpoint: '/farms/f/features/x', payload: null });
+
+    const r = await replayQueue();
+
+    expect(r.replayed).toBe(3);
+    expect(await db.pending.count()).toBe(0);
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
+      'POST /api/farms/f/features',
+      'PATCH /api/farms/f/paddocks/p',
+      'DELETE /api/farms/f/features/x',
+    ]);
+    const h = (i: number) => calls[i]!.init.headers as Record<string, string>;
+    expect(h(0)['If-Match']).toBeUndefined();
+    expect(h(1)['If-Match']).toBe('"7"');
+    expect(calls[2]!.init.body).toBeUndefined();
+  });
+
+  it('a network drop mid-queue keeps the rest, in order', async () => {
+    let n = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        n += 1;
+        if (n === 2) throw new TypeError('Failed to fetch');
+        return new Response('{}', { status: 200 });
+      }),
+    );
+    await queueMutation({ id: 'a', op: 'create', method: 'POST', endpoint: '/farms/f/features', payload: {} });
+    await new Promise((r) => setTimeout(r, 2));
+    await queueMutation({ id: 'b', op: 'create', method: 'POST', endpoint: '/farms/f/features', payload: {} });
+    await new Promise((r) => setTimeout(r, 2));
+    await queueMutation({ id: 'c', op: 'create', method: 'POST', endpoint: '/farms/f/features', payload: {} });
+    const r = await replayQueue();
+    expect(r.replayed).toBe(1);
+    expect((await db.pending.orderBy('createdAt').toArray()).map((p) => p.id)).toEqual(['b', 'c']);
+  });
+});

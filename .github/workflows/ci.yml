@@ -32,7 +32,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # PT36 — 22, not 20: Node 20 has no global `navigator`, so photoQueue's
+          # tests (PT28, written and run on Node 22) crashed the moment the web
+          # suite first ran in CI. 22 also matches the dev machines; 20 is EOL.
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: |
             web/package-lock.json

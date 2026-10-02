@@ -27,7 +27,6 @@ import { queueMutation } from '../lib/db';
 import { recordConflict } from '../lib/conflictNotice';
 import type { ImportPlan } from '../lib/importData';
 import { geometryCoords } from '../lib/geo';
-import { exportFarmPdf } from '../lib/exportPdf';
 import { formatArea, formatLength } from '../lib/units';
 import { useFarmData } from '../hooks/useFarmData';
 import { forExport } from '../lib/pendingOverlay';
@@ -385,6 +384,8 @@ export function FarmMap() {
   const handleExport = useCallback(async () => {
     const map = mapRef.current;
     if (!map) throw new Error('Map not ready');
+    // PT32 — jsPDF + html2canvas (~380 KB) load only when Export is pressed.
+    const { exportFarmPdf } = await import('../lib/exportPdf');
     await exportFarmPdf({
       map,
       farm,

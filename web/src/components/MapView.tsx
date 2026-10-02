@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import MapboxDraw, { type DrawCustomMode } from '@mapbox/mapbox-gl-draw';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import {
   AUSTRALIA_CENTER,
   AUSTRALIA_ZOOM,
@@ -26,6 +29,11 @@ interface MapViewProps {
   onCreate?: (feature: GeoJsonFeature) => void;
   onReady?: (map: maplibregl.Map) => void;
 }
+
+// PT32 — `maplibre-gl` resolves to the CSP build (vite.config.ts), which
+// loads its worker from a same-origin file instead of a blob. The file is a
+// hashed asset, so the service worker precaches it like any other script.
+maplibregl.workerUrl = maplibreWorkerUrl;
 
 const EMPTY = { type: 'FeatureCollection' as const, features: [] };
 

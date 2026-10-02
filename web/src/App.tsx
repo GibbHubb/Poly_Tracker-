@@ -1,13 +1,27 @@
-import { useEffect } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { FarmList } from './pages/FarmList';
-import { FarmMap } from './pages/FarmMap';
-import { Settings } from './pages/Settings';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { startAutoSync } from './lib/sync';
 import { ConflictToast } from './components/ConflictToast';
 import { Toaster } from './components/Toaster';
 import { ErrorBoundary } from './components/ErrorBoundary';
+
+// PT32 — the map screen (MapLibre, mapbox-gl-draw, turf, exifr) and the
+// settings screen are split out of the entry chunk, so `/` paints from the
+// shell alone. Both are still precached by the service worker, so offline use
+// is unchanged; this only changes what has to arrive before the first paint.
+const FarmMap = lazy(() => import('./pages/FarmMap').then((m) => ({ default: m.FarmMap })));
+const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
+
+/** Same dark surface as the shell, so a slow chunk is a pause, not a white flash. */
+function RouteFallback() {
+  return (
+    <div className="flex h-full items-center justify-center bg-slate-900 text-sm text-slate-400" role="status">
+      Loading…
+    </div>
+  );
+}
 
 function StatusBadge() {
   const { online, pending } = useOnlineStatus();
@@ -47,11 +61,13 @@ export default function App() {
             </header>
             <main className="min-h-0 flex-1">
               <ErrorBoundary key={pathname}>
-                <Routes>
-                  <Route path="/" element={<FarmList />} />
-                  <Route path="/farms/:farmId" element={<FarmMap />} />
-                  <Route path="/settings" element={<Settings />} />
-                </Routes>
+                <Suspense fallback={<RouteFallback />}>
+                  <Routes>
+                    <Route path="/" element={<FarmList />} />
+                    <Route path="/farms/:farmId" element={<FarmMap />} />
+                    <Route path="/settings" element={<Settings />} />
+                  </Routes>
+                </Suspense>
               </ErrorBoundary>
             </main>
             <ConflictToast />

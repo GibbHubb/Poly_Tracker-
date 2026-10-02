@@ -3,8 +3,8 @@ import { BrowserRouter } from 'react-router-dom';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import './index.css';
-import 'maplibre-gl/dist/maplibre-gl.css';
-import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
+// PT32 — the MapLibre + Draw stylesheets moved to MapView.tsx, so they ship
+// with the map chunk instead of blocking the first paint of every screen.
 
 registerSW({ immediate: true });
 

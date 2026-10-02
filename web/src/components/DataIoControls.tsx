@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { api, type GeoJsonFeatureCollection, type ImportGeojsonReport } from '../lib/api';
 import { mergeFarmGeoJson, pointsToCsv, downloadBlob } from '../lib/exportData';
 import { parseImport, buildImportPlan, type ImportPlan } from '../lib/importData';
+import { notify, reportError } from '../lib/notify';
 
 interface Props {
   farmId: string;
@@ -54,8 +55,11 @@ export function DataIoControls({
         setPlan(buildImportPlan(fc));
         setImportError(null);
       } catch (err) {
-        setImportError(err instanceof Error ? err.message : 'Invalid file.');
-        alert(err instanceof Error ? err.message : 'Invalid file.');
+        // PT35 — the dialog that shows importError only opens on a GOOD file, so
+        // a bad one needs a notice of its own (it used to be an alert()).
+        const msg = err instanceof Error ? err.message : 'Invalid file.';
+        setImportError(msg);
+        notify('error', `Reading the import file failed: ${msg}`);
       }
     };
     reader.readAsText(file);
@@ -71,7 +75,7 @@ export function DataIoControls({
       setServerReport(report);
       if (report.committed) onServerImportComplete?.();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Server import failed.');
+      reportError('Server import', err);
     } finally {
       setServerImporting(false);
     }
@@ -84,7 +88,7 @@ export function DataIoControls({
       await onImport(plan);
       setPlan(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Import failed.');
+      reportError('Import', err);
     } finally {
       setImporting(false);
     }

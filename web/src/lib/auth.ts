@@ -8,6 +8,8 @@ function readKey(key: string): string | null {
   try {
     return localStorage.getItem(key);
   } catch {
+    // PT35 — silent on purpose: localStorage is unavailable (private mode, storage
+    // blocked). "No token stored" is the correct answer then, not an error.
     return null;
   }
 }
@@ -16,7 +18,8 @@ function writeKey(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
   } catch {
-    // localStorage unavailable (SSR/private mode) — ignore.
+    // PT35 — silent on purpose: localStorage unavailable (private mode). The Settings
+    // page reads the value back, so a token that did not stick is visible there.
   }
 }
 
@@ -24,7 +27,7 @@ function removeKey(key: string): void {
   try {
     localStorage.removeItem(key);
   } catch {
-    // ignore
+    // PT35 — silent on purpose: nothing to remove when storage is unavailable.
   }
 }
 

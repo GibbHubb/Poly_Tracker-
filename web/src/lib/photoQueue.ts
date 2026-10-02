@@ -27,6 +27,7 @@ export async function queuePhoto(meta: PhotoMeta): Promise<{ id: string; queued:
   const createdAt = Math.max(Date.now(), (last?.createdAt ?? 0) + 1);
   await db.photoQueue.put({ ...meta, id, createdAt, status: 'queued' });
   // Ask the browser not to evict this origin's storage; best effort, ignored where unsupported.
+  // Silent on purpose (PT35): persistence is a best-effort request the browser may refuse.
   void navigator.storage?.persist?.().catch(() => undefined);
   return { id, queued: queued + 1 };
 }
@@ -57,6 +58,7 @@ async function errorReason(res: Response): Promise<string> {
     const body = (await res.json()) as { error?: string; message?: string };
     return body.error || body.message || `HTTP ${res.status}`;
   } catch {
+    // Silent on purpose (PT35): a non-JSON error body still has a status to report.
     return `HTTP ${res.status}`;
   }
 }

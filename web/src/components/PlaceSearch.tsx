@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { notify } from '../lib/notify';
 
 export interface PlaceHit {
   label: string;
@@ -62,8 +63,14 @@ export function PlaceSearch({ onSelect }: Props) {
           })),
         );
         setOpen(true);
-      } catch {
+      } catch (err) {
+        // PT35 — "no results" and "search is down" used to look identical.
         setHits([]);
+        console.warn('[Place search]', err);
+        notify(
+          'error',
+          `Place search failed: ${navigator.onLine ? 'the search service did not answer' : 'no connection'}.`,
+        );
       } finally {
         setLoading(false);
       }

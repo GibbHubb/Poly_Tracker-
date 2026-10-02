@@ -236,7 +236,8 @@ export const api = {
     });
     if (!res.ok && res.status !== 422) {
       const text = await res.text();
-      throw new Error(`API ${res.status}: ${text}`);
+      // PT35 — an ApiError, so the caller can tell "refused" from "offline".
+      throw new ApiError(res.status, text);
     }
     return (await res.json()) as ImportGeojsonReport;
   },

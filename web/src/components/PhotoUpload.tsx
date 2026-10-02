@@ -4,6 +4,7 @@ import { db } from '../lib/db';
 import { PhotoQueueFullError, queuePhoto } from '../lib/photoQueue';
 import { downscalePhoto } from '../lib/downscale';
 import { getWriteToken } from '../lib/auth';
+import { api } from '../lib/api';
 
 interface Props {
   featureType?: string;
@@ -31,13 +32,28 @@ const BASE = import.meta.env.VITE_API_BASE || '/api';
 export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
   const [status, setStatus] = useState<string | null>(null);
   const [photos, setPhotos] = useState<PhotoRow[]>([]);
+  // PT35 — shown inline, not as a notice: this list is polled every 5 s, and a
+  // toast per poll while offline would bury the map.
+  const [listError, setListError] = useState<string | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
 
   const loadPhotos = () => {
     if (!featureId) return;
-    fetch(`${BASE}/photos?feature_id=${featureId}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: PhotoRow[]) => setPhotos(rows))
-      .catch(() => undefined);
+    // Through the api client (PT35): the bare fetch sent no read token, so with
+    // reads locked the list 401'd and showed as "no photos" with no hint why.
+    api
+      .listPhotos({ featureId })
+      .then((rows) => {
+        setPhotos(rows);
+        setListError(null);
+      })
+      .catch(() =>
+        setListError(
+          navigator.onLine
+            ? 'Could not load the photos already attached.'
+            : 'Offline: photos already attached are not shown.',
+        ),
+      );
   };
 
   useEffect(loadPhotos, [featureId]);
@@ -59,8 +75,13 @@ export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
         const next = rows.map((r) => ({ id: r.id, url: URL.createObjectURL(r.blob), failed: r.status === 'failed' }));
         urls = next.map((q) => q.url);
         setQueued(next);
+        setQueueError(null);
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        // PT35 — IndexedDB refusing a read is rare and worth seeing.
+        console.warn('[PhotoUpload] queued photos unreadable', err);
+        setQueueError('Photos waiting on this device could not be read.');
+      });
     return () => {
       cancelled = true;
       urls.forEach((u) => URL.revokeObjectURL(u));
@@ -226,6 +247,11 @@ export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
             </a>
           ))}
         </div>
+      )}
+      {(listError || queueError) && (
+        <p className="mb-2 text-xs text-amber-400" data-testid="photo-list-error">
+          {[queueError, listError].filter(Boolean).join(' ')}
+        </p>
       )}
       <label className="block cursor-pointer">
         <span className="rounded-md bg-slate-700 px-3 py-2 text-white">

@@ -30,8 +30,26 @@ import type { ImportPlan } from '../lib/importData';
 import { geometryCoords } from '../lib/geo';
 import { exportFarmPdf } from '../lib/exportPdf';
 import { formatArea, formatLength } from '../lib/units';
+import { describeError, isNetworkError, notify, reportError, shouldQueue } from '../lib/notify';
 
 const EMPTY: GeoJsonFeatureCollection = { type: 'FeatureCollection', features: [] };
+
+const KIND_LABEL: Record<DrawKind, string> = {
+  paddock: 'paddock',
+  polyRun: 'poly run',
+  feature: 'point',
+};
+
+/** PT35 — what to tell the user when a write was put in the offline queue. */
+function queuedText(what: string, err: unknown): string {
+  // A 503 carries our own sentence (PT23: "Writes are disabled: …"), which is the
+  // actual fix; "the server is having a problem" would hide it.
+  if (err instanceof ApiError && err.status === 503) {
+    return `${describeError(`Saving ${what}`, err)} It is kept on this device and will sync once that is fixed.`;
+  }
+  const why = isNetworkError(err) ? 'No connection' : 'The server is having a problem';
+  return `${why}: ${what} is saved on this device and will sync automatically.`;
+}
 
 /** Build the GeoJSON properties payload for a given kind from the dialog. */
 function propsFor(
@@ -73,6 +91,8 @@ export function FarmMap() {
   const [editing, setEditing] = useState<SidebarSelection | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  // PT35 — a farm that fails to load says so; it used to be a blank satellite map.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     const [f, pd, pr, ft] = await Promise.all([
@@ -120,10 +140,23 @@ export function FarmMap() {
     });
   }, [farmId]);
 
-  useEffect(() => {
-    void reload().catch(() => undefined);
-    void reloadPhotos().catch(() => undefined);
+  const loadAll = useCallback(() => {
+    setLoadError(null);
+    reload().catch((err: unknown) => setLoadError(describeError('Loading this farm', err)));
+    reloadPhotos().catch((err: unknown) => reportError('Loading photo markers', err));
   }, [reload, reloadPhotos]);
+
+  useEffect(loadAll, [loadAll]);
+
+  /** After a successful write: refresh, but a failed refresh must not look like a failed write. */
+  const refreshAfterWrite = useCallback(async (): Promise<void> => {
+    try {
+      await reload();
+      setLoadError(null);
+    } catch (err) {
+      reportError('Refreshing the map', err, () => void refreshAfterWrite());
+    }
+  }, [reload]);
 
   // Once the map is ready and the farm's geometry has loaded, fit the view
   // to it (one-shot — don't fight the user's later pan/zoom).
@@ -184,12 +217,18 @@ export function FarmMap() {
         properties: propsFor(kind, r),
       };
 
+      const what = `the new ${KIND_LABEL[kind]}`;
       try {
         if (kind === 'paddock') await api.createPaddock(farmId, base);
         else if (kind === 'polyRun') await api.createPolyRun(farmId, base);
         else await api.createFeature(farmId, base);
-        await reload();
-      } catch {
+      } catch (err) {
+        // PT35 — a refusal (400/404/413/422) is not "offline": queuing it would
+        // replay the same refusal forever and block every edit behind it.
+        if (!shouldQueue(err)) {
+          reportError(`Saving ${what}`, err);
+          return;
+        }
         const endpoint =
           kind === 'paddock'
             ? `/farms/${farmId}/paddocks`
@@ -203,9 +242,14 @@ export function FarmMap() {
           endpoint,
           payload: base,
         });
+        notify('info', queuedText(what, err));
+        return;
       }
+      // Outside the try (PT35): a failed refresh after a SUCCESSFUL create used
+      // to fall into the catch and queue the create a second time.
+      await refreshAfterWrite();
     },
-    [pending, farmId, reload],
+    [pending, farmId, refreshAfterWrite],
   );
 
   // Sidebar click: fly the map to the feature, then open the edit dialog.
@@ -264,7 +308,6 @@ export function FarmMap() {
         else if (kind === 'polyRun')
           await api.updatePolyRun(farmId, id, patch, version);
         else await api.updateFeature(farmId, id, patch, version);
-        await reload();
       } catch (err) {
         // PT18-fu2 — a conflict is NOT an offline failure. Queuing it would
         // replay the very write the precondition just refused, so it goes to
@@ -280,7 +323,12 @@ export function FarmMap() {
             resolvedAt: Date.now(),
             payload: patch,
           });
-          await reload();
+          await refreshAfterWrite();
+          return;
+        }
+        const what = `your change to this ${KIND_LABEL[kind]}`;
+        if (!shouldQueue(err)) {
+          reportError(`Saving ${what}`, err);
           return;
         }
         await queueMutation({
@@ -291,9 +339,12 @@ export function FarmMap() {
           payload: patch,
           baseVersion: version,
         });
+        notify('info', queuedText(what, err));
+        return;
       }
+      await refreshAfterWrite();
     },
-    [editing, farmId, reload],
+    [editing, farmId, refreshAfterWrite],
   );
 
   // Delete the selected feature (offline-queued if the API is unreachable).
@@ -305,8 +356,11 @@ export function FarmMap() {
       if (kind === 'paddock') await api.deletePaddock(farmId, id);
       else if (kind === 'polyRun') await api.deletePolyRun(farmId, id);
       else await api.deleteFeature(farmId, id);
-      await reload();
-    } catch {
+    } catch (err) {
+      if (!shouldQueue(err)) {
+        reportError(`Deleting this ${KIND_LABEL[kind]}`, err);
+        return;
+      }
       const endpoint =
         kind === 'paddock'
           ? `/farms/${farmId}/paddocks/${id}`
@@ -320,8 +374,11 @@ export function FarmMap() {
         endpoint,
         payload: null,
       });
+      notify('info', queuedText(`the delete of this ${KIND_LABEL[kind]}`, err));
+      return;
     }
-  }, [editing, farmId, reload]);
+    await refreshAfterWrite();
+  }, [editing, farmId, refreshAfterWrite]);
 
   const handleExport = useCallback(async () => {
     const map = mapRef.current;
@@ -333,6 +390,8 @@ export function FarmMap() {
     async (plan: ImportPlan) => {
       let created = 0;
       let queued = 0;
+      let refused = 0;
+      let firstRefusal: unknown = null;
 
       const tryCreate = async (
         kind: 'paddock' | 'polyRun' | 'feature',
@@ -343,7 +402,13 @@ export function FarmMap() {
           else if (kind === 'polyRun') await api.createPolyRun(farmId, feature);
           else await api.createFeature(farmId, feature);
           created++;
-        } catch {
+        } catch (err) {
+          // PT35 — a refused row is counted and reported, not queued to fail again.
+          if (!shouldQueue(err)) {
+            refused++;
+            firstRefusal ??= err;
+            return;
+          }
           const endpoint =
             kind === 'paddock'
               ? `/farms/${farmId}/paddocks`
@@ -365,12 +430,13 @@ export function FarmMap() {
       for (const f of plan.polyRuns) await tryCreate('polyRun', f);
       for (const f of plan.features) await tryCreate('feature', f);
 
-      await reload();
-      alert(
-        `Import complete: ${created} created, ${queued} queued offline, ${plan.skipped ?? 0} skipped.`,
-      );
+      await refreshAfterWrite();
+      const refusedText = refused ? `, ${refused} refused by the server` : '';
+      const summary = `Import complete: ${created} created, ${queued} queued offline, ${plan.skipped ?? 0} skipped${refusedText}.`;
+      if (refused) notify('error', `${summary} ${describeError('First refusal', firstRefusal)}`);
+      else notify('success', summary);
     },
-    [farmId, reload],
+    [farmId, refreshAfterWrite],
   );
 
   return (
@@ -387,6 +453,22 @@ export function FarmMap() {
             setMapReady(true);
           }}
         />
+        {loadError && (
+          <div
+            role="alert"
+            data-testid="farm-load-error"
+            className="absolute left-1/2 top-16 z-20 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-start gap-3 rounded-lg border border-red-500/70 bg-slate-900 px-4 py-3 text-sm text-slate-100 shadow-xl"
+          >
+            <span aria-hidden>⚠️</span>
+            <p className="flex-1">{loadError}</p>
+            <button
+              onClick={loadAll}
+              className="min-h-[32px] shrink-0 rounded-md bg-brand px-3 py-1 text-xs text-white"
+            >
+              Retry
+            </button>
+          </div>
+        )}
         <FeatureDialog
           kind={pending?.kind ?? null}
           onCancel={() => setPending(null)}
@@ -480,7 +562,7 @@ export function FarmMap() {
             polyRuns={polyRuns}
             features={features}
             onImport={handleImport}
-            onServerImportComplete={() => void reload()}
+            onServerImportComplete={() => void refreshAfterWrite()}
           />
           <ExportPdfButton onExport={handleExport} />
         </div>

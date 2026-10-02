@@ -2,6 +2,8 @@ import { db, type PendingMutation } from './db';
 import { getWriteToken } from './auth';
 import { replayPhotoQueue } from './photoQueue';
 import { recordConflict } from './conflictNotice';
+import { ApiError } from './api';
+import { describeError, notify, shouldQueue } from './notify';
 
 const BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -22,6 +24,9 @@ export async function replayQueue(): Promise<SyncResult> {
   running = true;
   const conflicts: PendingMutation[] = [];
   let replayed = 0;
+  // PT35 — rows the server refused outright, set aside so they stop blocking the queue.
+  let refused = 0;
+  let firstRefusal: ApiError | null = null;
   try {
     const queue = await db.pending.orderBy('createdAt').toArray();
     for (const m of queue) {
@@ -57,16 +62,53 @@ export async function replayQueue(): Promise<SyncResult> {
           });
           await db.pending.delete(m.id);
         } else {
-          // 4xx/5xx that isn't a conflict — stop and retry later.
+          // An unreadable body still leaves the status to report.
+          const err = new ApiError(res.status, await res.text().catch(() => ''));
+          if (!shouldQueue(err)) {
+            // PT35 — a 400/404/422 will get the same answer every time. It used to
+            // `break` here and hold every edit behind it forever. Set it aside in
+            // the conflict log (Settings → Sync conflicts can discard or re-apply
+            // it) and carry on with the rest.
+            await db.conflicts.put({
+              id: m.id,
+              op: m.op,
+              endpoint: m.endpoint,
+              method: m.method,
+              status: res.status,
+              resolvedAt: Date.now(),
+              payload: m.payload,
+            });
+            await db.pending.delete(m.id);
+            refused += 1;
+            firstRefusal ??= err;
+            continue;
+          }
+          // 5xx / auth: may clear up — stop, keep the queue, and say so (PT35):
+          // the only sign used to be a pending count that never went down.
+          const left = queue.length - replayed - conflicts.length - refused;
+          notify(
+            'error',
+            describeError(`Syncing ${left} saved edit${left === 1 ? '' : 's'}`, err) +
+              ' They stay on this device and sync will try again.',
+          );
           break;
         }
       } catch {
-        // offline again — stop, keep remaining queue intact.
+        // Silent on purpose (PT35): the connection dropped mid-replay. That is
+        // the normal offline case, not a fault; the queue is kept, the status
+        // badge shows the pending count, and the next 'online' event retries.
         break;
       }
     }
   } finally {
     running = false;
+  }
+  if (refused > 0) {
+    notify(
+      'error',
+      `${refused} saved edit${refused === 1 ? ' was' : 's were'} refused by the server and set aside (Settings → Sync conflicts). ` +
+        describeError('First refusal', firstRefusal),
+    );
   }
   return { replayed, conflicts };
 }
@@ -85,6 +127,8 @@ export function startAutoSync(): () => void {
   if (navigator.onLine) handler();
   // Weak signal often never flips navigator.onLine, so no 'online' event ever fires: retry on a timer.
   const timer = window.setInterval(() => {
+    // Silent on purpose (PT35): a timer retry while signal is weak is expected to
+    // fail often; replayPhotoQueue records real refusals on the photo itself.
     if (navigator.onLine) void replayPhotoQueue().catch(() => undefined);
   }, PHOTO_RETRY_MS);
   return () => {

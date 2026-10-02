@@ -1,11 +1,13 @@
 import { useEffect } from 'react';
-import { Link, Route, Routes } from 'react-router-dom';
+import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { FarmList } from './pages/FarmList';
 import { FarmMap } from './pages/FarmMap';
 import { Settings } from './pages/Settings';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { startAutoSync } from './lib/sync';
 import { ConflictToast } from './components/ConflictToast';
+import { Toaster } from './components/Toaster';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 function StatusBadge() {
   const { online, pending } = useOnlineStatus();
@@ -23,6 +25,8 @@ function StatusBadge() {
 
 export default function App() {
   useEffect(() => startAutoSync(), []);
+  // PT35 — keyed on the path so leaving a broken screen clears the boundary.
+  const { pathname } = useLocation();
 
   return (
     <Routes>
@@ -42,13 +46,16 @@ export default function App() {
               </div>
             </header>
             <main className="min-h-0 flex-1">
-              <Routes>
-                <Route path="/" element={<FarmList />} />
-                <Route path="/farms/:farmId" element={<FarmMap />} />
-                <Route path="/settings" element={<Settings />} />
-              </Routes>
+              <ErrorBoundary key={pathname}>
+                <Routes>
+                  <Route path="/" element={<FarmList />} />
+                  <Route path="/farms/:farmId" element={<FarmMap />} />
+                  <Route path="/settings" element={<Settings />} />
+                </Routes>
+              </ErrorBoundary>
             </main>
             <ConflictToast />
+            <Toaster />
           </div>
         }
       />

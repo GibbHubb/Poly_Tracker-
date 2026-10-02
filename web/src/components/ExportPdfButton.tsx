@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { notify } from '../lib/notify';
 
 interface Props {
   onExport: () => Promise<void>;
@@ -12,7 +13,9 @@ export function ExportPdfButton({ onExport }: Props) {
     try {
       await onExport();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Export failed');
+      // PT35 — a notice, not an alert(); export is local, so the message is ours to show.
+      console.warn('[Export PDF]', e);
+      notify('error', `Export PDF failed: ${e instanceof Error ? e.message : 'unknown error'}.`);
     } finally {
       setBusy(false);
     }

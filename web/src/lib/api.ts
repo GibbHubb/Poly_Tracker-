@@ -87,6 +87,13 @@ export function isConflictError(err: unknown): boolean {
   return err instanceof ApiError && (err.status === 409 || err.status === 412);
 }
 
+/**
+ * PT29 — how many API answers the service worker served from its cache instead
+ * of the network (it marks them with `x-pt-from-cache`). A caller compares the
+ * count before and after a load to know whether what it got is fresh.
+ */
+export const apiCacheHits = { count: 0 };
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase();
   const isMutation = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
@@ -99,6 +106,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
   });
+  if (res.headers.get('x-pt-from-cache')) apiCacheHits.count += 1;
   if (!res.ok) {
     const text = await res.text();
     throw new ApiError(res.status, text);

@@ -20,7 +20,6 @@ import {
   api,
   ApiError,
   isConflictError,
-  type Farm,
   type GeoJsonFeature,
   type GeoJsonFeatureCollection,
 } from '../lib/api';
@@ -30,6 +29,8 @@ import type { ImportPlan } from '../lib/importData';
 import { geometryCoords } from '../lib/geo';
 import { exportFarmPdf } from '../lib/exportPdf';
 import { formatArea, formatLength } from '../lib/units';
+import { useFarmData } from '../hooks/useFarmData';
+import { forExport } from '../lib/pendingOverlay';
 import { describeError, isNetworkError, notify, reportError, shouldQueue } from '../lib/notify';
 
 const EMPTY: GeoJsonFeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -73,10 +74,9 @@ function propsFor(
 
 export function FarmMap() {
   const { farmId = '' } = useParams();
-  const [farm, setFarm] = useState<Farm | null>(null);
-  const [paddocks, setPaddocks] = useState(EMPTY);
-  const [polyRuns, setPolyRuns] = useState(EMPTY);
-  const [features, setFeatures] = useState(EMPTY);
+  // PT29 — device copy + network + queued edits, in one place.
+  const data = useFarmData(farmId);
+  const { farm, paddocks, polyRuns, features, reload, loadError } = data;
   const [photos, setPhotos] = useState(EMPTY);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [mapReady, setMapReady] = useState(false);
@@ -91,21 +91,17 @@ export function FarmMap() {
   const [editing, setEditing] = useState<SidebarSelection | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
-  // PT35 — a farm that fails to load says so; it used to be a blank satellite map.
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const reload = useCallback(async () => {
-    const [f, pd, pr, ft] = await Promise.all([
-      api.getFarm(farmId),
-      api.listPaddocks(farmId),
-      api.listPolyRuns(farmId),
-      api.listFeatures(farmId),
-    ]);
-    setFarm(f);
-    setPaddocks(pd);
-    setPolyRuns(pr);
-    setFeatures(ft);
-  }, [farmId]);
+  const [online, setOnline] = useState(navigator.onLine);
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, []);
 
   // Geotagged photos → Point features (precompute the file URL so MapView
   // stays API-agnostic). The photos API isn't farm-scoped, so this lists all
@@ -140,19 +136,25 @@ export function FarmMap() {
     });
   }, [farmId]);
 
-  const loadAll = useCallback(() => {
-    setLoadError(null);
-    reload().catch((err: unknown) => setLoadError(describeError('Loading this farm', err)));
+  // Photo markers: offline they simply are not there (PT28 queues new ones);
+  // online, a failure is reported.
+  useEffect(() => {
+    reloadPhotos().catch((err: unknown) => {
+      if (navigator.onLine) reportError('Loading photo markers', err);
+    });
+  }, [reloadPhotos]);
+
+  const retryLoad = useCallback(() => {
+    reload().catch((err: unknown) => reportError('Loading this farm', err));
     reloadPhotos().catch((err: unknown) => reportError('Loading photo markers', err));
   }, [reload, reloadPhotos]);
 
-  useEffect(loadAll, [loadAll]);
-
   /** After a successful write: refresh, but a failed refresh must not look like a failed write. */
   const refreshAfterWrite = useCallback(async (): Promise<void> => {
+    // Offline the overlay already shows the queued write; nothing to refresh.
+    if (navigator.onLine === false) return;
     try {
       await reload();
-      setLoadError(null);
     } catch (err) {
       reportError('Refreshing the map', err, () => void refreshAfterWrite());
     }
@@ -383,7 +385,13 @@ export function FarmMap() {
   const handleExport = useCallback(async () => {
     const map = mapRef.current;
     if (!map) throw new Error('Map not ready');
-    await exportFarmPdf({ map, farm, paddocks, polyRuns, features });
+    await exportFarmPdf({
+      map,
+      farm,
+      paddocks: forExport(paddocks),
+      polyRuns: forExport(polyRuns),
+      features: forExport(features),
+    });
   }, [farm, paddocks, polyRuns, features]);
 
   const handleImport = useCallback(
@@ -453,6 +461,32 @@ export function FarmMap() {
             setMapReady(true);
           }}
         />
+        {!loadError && data.refreshError && (
+          <div
+            role="alert"
+            data-testid="farm-refresh-error"
+            className="absolute bottom-12 left-1/2 z-10 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center gap-3 rounded-lg border border-red-500/70 bg-slate-900 px-3 py-2 text-xs text-slate-100 shadow-lg"
+          >
+            <p className="flex-1">{data.refreshError}</p>
+            <button onClick={retryLoad} className="min-h-[32px] shrink-0 rounded-md bg-brand px-3 py-1 text-xs text-white">
+              Retry
+            </button>
+          </div>
+        )}
+        {!loadError && data.source === 'cache' && (
+          <div
+            role="status"
+            data-testid="offline-copy-banner"
+            className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-amber-500/90 px-3 py-1 text-xs font-medium text-slate-950 shadow-lg"
+          >
+            {online ? (data.refreshError ? 'Showing the copy on this device' : 'Showing the copy on this device; refreshing…') : 'Offline'}
+            {' · '}
+            {data.fetchedAt
+              ? `copy from ${new Date(data.fetchedAt).toLocaleString()}`
+              : 'copy of unknown age'}
+            {data.pendingCount > 0 ? ` · ${data.pendingCount} edit${data.pendingCount === 1 ? '' : 's'} waiting to sync` : ''}
+          </div>
+        )}
         {loadError && (
           <div
             role="alert"
@@ -462,7 +496,7 @@ export function FarmMap() {
             <span aria-hidden>⚠️</span>
             <p className="flex-1">{loadError}</p>
             <button
-              onClick={loadAll}
+              onClick={retryLoad}
               className="min-h-[32px] shrink-0 rounded-md bg-brand px-3 py-1 text-xs text-white"
             >
               Retry
@@ -558,9 +592,9 @@ export function FarmMap() {
           <DataIoControls
             farmId={farmId}
             farmName={farm?.name ?? 'farm'}
-            paddocks={paddocks}
-            polyRuns={polyRuns}
-            features={features}
+            paddocks={forExport(paddocks)}
+            polyRuns={forExport(polyRuns)}
+            features={forExport(features)}
             onImport={handleImport}
             onServerImportComplete={() => void refreshAfterWrite()}
           />

@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
-import { CacheFirst, StaleWhileRevalidate } from 'workbox-strategies';
+import { CacheFirst, NetworkFirst, StaleWhileRevalidate } from 'workbox-strategies';
 import { CacheableResponsePlugin } from 'workbox-cacheable-response';
 import { ExpirationPlugin } from 'workbox-expiration';
 
@@ -73,12 +73,41 @@ registerRoute(
 );
 
 // API GET responses — last-known data when offline.
+//
+// PT29 — NetworkFirst, not StaleWhileRevalidate. SWR answers from the cache
+// FIRST, online too, so the refresh after a save (or after the offline queue
+// drained) was handed the list from BEFORE the save: measured, a synced farm
+// showed 5 points where the server held 4. Online now always asks the server;
+// the cache only answers when the network does not (offline, or > 5 s).
 registerRoute(
   ({ url, request }) =>
     url.pathname.startsWith('/api/') && request.method === 'GET',
-  new StaleWhileRevalidate({
+  new NetworkFirst({
+    networkTimeoutSeconds: 5,
     cacheName: 'api-cache',
-    plugins: [new CacheableResponsePlugin({ statuses: [0, 200] })],
+    // PT29 — bounded. The farm snapshot in IndexedDB is now the offline copy
+    // that matters; this cache is a fallback and must not grow forever.
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [0, 200] }),
+      new ExpirationPlugin({
+        maxEntries: 200,
+        maxAgeSeconds: 60 * 60 * 24 * 30,
+        purgeOnQuotaError: true,
+      }),
+      // Mark a cache fallback, so the app never stores or labels it as fresh.
+      {
+        cachedResponseWillBeUsed: async ({ cachedResponse }) => {
+          if (!cachedResponse) return null;
+          const headers = new Headers(cachedResponse.headers);
+          headers.set('x-pt-from-cache', '1');
+          return new Response(await cachedResponse.blob(), {
+            status: cachedResponse.status,
+            statusText: cachedResponse.statusText,
+            headers,
+          });
+        },
+      },
+    ],
   }),
 );
 

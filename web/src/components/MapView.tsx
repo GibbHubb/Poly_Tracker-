@@ -29,6 +29,9 @@ interface MapViewProps {
 
 const EMPTY = { type: 'FeatureCollection' as const, features: [] };
 
+/** PT29 — true for a row drawn from the offline queue, not yet on the server. */
+const PENDING: maplibregl.ExpressionSpecification = ['==', ['get', '_pending'], true];
+
 /**
  * MapLibre canvas with Mapbox-GL-Draw wired in, plus rendering of already-
  * saved paddocks / poly runs / points coloured by each feature's `color`
@@ -140,7 +143,7 @@ export function MapView({
         source: 'saved-paddocks',
         paint: {
           'fill-color': ['coalesce', ['get', 'color'], '#22d3ee'],
-          'fill-opacity': 0.2,
+          'fill-opacity': ['case', PENDING, 0.08, 0.2],
         },
       });
       map.addLayer({
@@ -150,6 +153,7 @@ export function MapView({
         paint: {
           'line-color': ['coalesce', ['get', 'color'], '#22d3ee'],
           'line-width': 3,
+          'line-opacity': ['case', PENDING, 0.45, 1],
         },
       });
       map.addLayer({
@@ -160,8 +164,23 @@ export function MapView({
         paint: {
           'line-color': ['coalesce', ['get', 'color'], '#f97316'],
           'line-width': 4,
+          'line-opacity': ['case', PENDING, 0.45, 1],
         },
       });
+      // PT29 — queued (not yet saved) lines and paddock edges get a dashed amber
+      // overlay: line-dasharray cannot be data-driven, so it is its own layer.
+      for (const [id, source] of [
+        ['pending-polyruns-dash', 'saved-polyruns'],
+        ['pending-paddocks-dash', 'saved-paddocks'],
+      ] as const) {
+        map.addLayer({
+          id,
+          type: 'line',
+          source,
+          filter: PENDING,
+          paint: { 'line-color': '#fbbf24', 'line-width': 2, 'line-dasharray': [2, 2] },
+        });
+      }
       map.addLayer({
         id: 'saved-features-circle',
         type: 'circle',
@@ -169,8 +188,9 @@ export function MapView({
         paint: {
           'circle-radius': 6,
           'circle-color': ['coalesce', ['get', 'color'], '#38bdf8'],
-          'circle-stroke-color': '#0f172a',
-          'circle-stroke-width': 2,
+          'circle-opacity': ['case', PENDING, 0.5, 1],
+          'circle-stroke-color': ['case', PENDING, '#fbbf24', '#0f172a'],
+          'circle-stroke-width': ['case', PENDING, 3, 2],
         },
       });
       // Geotagged photos — distinct amber marker, clickable to open the image.
@@ -378,6 +398,8 @@ export function MapView({
       'visibility',
       vis(visibleLayers.features),
     );
+    map.setLayoutProperty('pending-paddocks-dash', 'visibility', vis(visibleLayers.paddocks));
+    map.setLayoutProperty('pending-polyruns-dash', 'visibility', vis(visibleLayers.polyRuns));
     // Labels (PT8): gated by the master Labels flag AND the matching layer's
     // own visibility, so hiding a layer hides its labels too.
     map.setLayoutProperty(

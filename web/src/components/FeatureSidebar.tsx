@@ -3,6 +3,7 @@ import type { GeoJsonFeature, GeoJsonFeatureCollection } from '../lib/api';
 import { FEATURE_COLORS, PALETTE } from '../lib/mapStyle';
 import { formatArea, formatLength } from '../lib/units';
 import { POINT_TYPES, type DrawKind, type PointType } from './FeatureDialog';
+import { isPendingFeature } from '../lib/pendingOverlay';
 
 export interface SidebarSelection {
   kind: DrawKind;
@@ -152,6 +153,7 @@ export function FeatureSidebar({
                   label={s.name || 'Unnamed'}
                   color={s.color}
                   meta={formatArea(s.area_m2) || undefined}
+                  pending={isPendingFeature(f)}
                   onClick={() => onSelect(s)}
                 />
               );
@@ -173,6 +175,7 @@ export function FeatureSidebar({
                   label={s.name || 'Unnamed'}
                   color={s.color}
                   meta={meta || undefined}
+                  pending={isPendingFeature(f)}
                   onClick={() => onSelect(s)}
                 />
               );
@@ -188,6 +191,7 @@ export function FeatureSidebar({
                   label={s.name || s.type}
                   color={s.color}
                   meta={s.type}
+                  pending={isPendingFeature(f)}
                   onClick={() => onSelect(s)}
                 />
               );
@@ -275,19 +279,26 @@ function Row({
   label,
   meta,
   color,
+  pending,
   onClick,
 }: {
   label: string;
   meta?: string;
   color?: string;
+  /** PT29 — queued offline, not on the server yet: shown, but not editable until it syncs. */
+  pending?: boolean;
   onClick: () => void;
 }) {
   return (
     <li>
       <button
         onClick={onClick}
-        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-slate-800"
+        disabled={pending}
+        data-pending={pending ? 'true' : undefined}
+        title={pending ? 'Saved on this device; waiting to sync. Editable once it has synced.' : undefined}
+        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-slate-800 disabled:cursor-default disabled:opacity-70 disabled:hover:bg-transparent"
       >
+        {pending && <span aria-label="waiting to sync">⏳</span>}
         <span
           className="h-2.5 w-2.5 shrink-0 rounded-full"
           style={{ backgroundColor: color ?? '#64748b' }}

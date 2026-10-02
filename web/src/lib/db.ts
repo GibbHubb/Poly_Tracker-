@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import type { Farm, GeoJsonFeatureCollection } from './api';
 
 export type MutationOp = 'create' | 'update' | 'delete';
 
@@ -70,12 +71,28 @@ export interface QueuedPhoto {
   serverErrors?: number;
 }
 
+/**
+ * PT29 — the last server copy of one farm, so a farm opened once online still
+ * opens in a paddock with no signal. Written on every successful load; never
+ * edited locally (queued edits are an overlay, see pendingOverlay.ts), so it
+ * always means "what the server said at fetchedAt".
+ */
+export interface CachedFarmData {
+  farmId: string;
+  farm: Farm;
+  paddocks: GeoJsonFeatureCollection;
+  polyRuns: GeoJsonFeatureCollection;
+  features: GeoJsonFeatureCollection;
+  fetchedAt: number;
+}
+
 class PolyTrackerDB extends Dexie {
   pending!: Table<PendingMutation, string>;
   photoQueue!: Table<QueuedPhoto, string>;
   farms!: Table<CachedFarm, string>;
   conflicts!: Table<ConflictRecord, string>;
   offlineAreas!: Table<OfflineArea, string>;
+  farmData!: Table<CachedFarmData, string>;
 
   constructor() {
     super('poly_tracker');
@@ -109,6 +126,16 @@ class PolyTrackerDB extends Dexie {
       conflicts: 'id, resolvedAt',
       offlineAreas: 'id, createdAt',
       photoQueue: 'id, createdAt, status, featureId',
+    });
+    // v6 (PT29): per-farm snapshot for offline opening. Additive — an older
+    // bundle opens the same pending/conflicts stores unchanged.
+    this.version(6).stores({
+      pending: 'id, createdAt',
+      farms: 'id',
+      conflicts: 'id, resolvedAt',
+      offlineAreas: 'id, createdAt',
+      photoQueue: 'id, createdAt, status, featureId',
+      farmData: 'farmId',
     });
   }
 }

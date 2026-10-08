@@ -3,7 +3,9 @@ import type { PoolClient } from 'pg';
 import multer from 'multer';
 import { pool } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
-import { featureCollectionSchema, type ImportFeature } from '../lib/geojson.js';
+import { ZodError } from 'zod';
+import { describeZodIssues, featureCollectionSchema, type ImportFeature } from '../lib/geojson.js';
+import { log } from '../middleware/observability.js';
 import { featureInput as paddockInput, insertPaddockTx } from './paddocks.js';
 import { featureInput as polyRunInput, insertPolyRunTx } from './polyRuns.js';
 import { featureInput as pointInput, insertFeatureTx } from './features.js';
@@ -44,6 +46,26 @@ async function insertByKind(
   if (kind === 'paddock') return insertPaddockTx(client, farmId, paddockInput.parse(feature));
   if (kind === 'polyRun') return insertPolyRunTx(client, farmId, polyRunInput.parse(feature));
   return insertFeatureTx(client, farmId, pointInput.parse(feature));
+}
+
+/**
+ * PT41 — what a refused row says in the report. A validation failure is OUR
+ * message (which field, what is wrong) and is shown as-is. Anything else came
+ * from Postgres, whose text names tables and constraints: it goes to the log
+ * under the request id, and the report gets a generic line plus the SQLSTATE.
+ */
+function rowError(e: unknown, requestId: string | undefined, index: number): string {
+  if (e instanceof ZodError) return describeZodIssues(e);
+  const code = (e as { code?: unknown } | null)?.code;
+  log({
+    level: 'warn',
+    msg: 'import row refused by the database',
+    requestId,
+    index,
+    code: typeof code === 'string' ? code : undefined,
+    error: e instanceof Error ? e.message : String(e),
+  });
+  return `rejected by the database${typeof code === 'string' ? ` (code ${code})` : ''}`;
 }
 
 interface ReportEntry {
@@ -112,7 +134,7 @@ importRouter.post(
         } catch (e) {
           await client.query('ROLLBACK TO SAVEPOINT feat');
           errored++;
-          const error = e instanceof Error ? e.message : String(e);
+          const error = rowError(e, res.locals.requestId as string | undefined, i);
           report.push({ index: i, kind, status: 'error', error });
           if (!partial) {
             // All-or-nothing: abort the whole batch on the first error.

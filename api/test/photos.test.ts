@@ -140,6 +140,8 @@ describe('photos — storage unavailable', () => {
         .attach('photo', JPEG, { filename: 'p.jpg', contentType: 'image/jpeg' });
       expect(res.status).toBe(503);
       expect(res.body.error).toMatch(/Photo storage is unavailable/);
+      // PT41 — the reason (env var names) is for the log, not the caller.
+      expect(res.body.error).not.toMatch(/SUPABASE|SERVICE_ROLE|PHOTO_/);
       expect(await photoCount()).toBe(0);
     } finally {
       vi.unstubAllEnvs();

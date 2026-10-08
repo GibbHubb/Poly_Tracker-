@@ -22,18 +22,22 @@ function distanceM(a: LngLat, b: LngLat): number {
 }
 
 /** Build a closed polygon ring approximating a circle. */
-function circleRing(center: LngLat, radiusM: number): LngLat[] {
+export function circleRing(center: LngLat, radiusM: number): LngLat[] {
   const ring: LngLat[] = [];
   const latRad = (center[1] * Math.PI) / 180;
   const dLat = (radiusM / EARTH_RADIUS_M) * (180 / Math.PI);
   const dLng = dLat / Math.max(Math.cos(latRad), 1e-6);
-  for (let i = 0; i <= STEPS; i += 1) {
+  for (let i = 0; i < STEPS; i += 1) {
     const theta = (i / STEPS) * 2 * Math.PI;
     ring.push([
       center[0] + dLng * Math.cos(theta),
       center[1] + dLat * Math.sin(theta),
     ]);
   }
+  // PT41 — close on the FIRST point itself: computing it again at theta = 2π
+  // can differ in the last bit (sin(2π) is -2.4e-16), and the API now refuses
+  // a ring whose first and last points are not identical.
+  ring.push(ring[0]!);
   return ring;
 }
 

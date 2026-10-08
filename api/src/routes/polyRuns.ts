@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
 import { parseIfMatch, setVersionETag, throwUpdateConflict } from '../lib/concurrency.js';
-import { bboxPredicate, bboxSchema, geometrySchema, rowsToCollection, rowToFeature } from '../lib/geojson.js';
+import { bboxPredicate, bboxSchema, lineGeometry, rowsToCollection, rowToFeature } from '../lib/geojson.js';
 
 // mergeParams: mounted at /api/farms/:farmId/poly-runs
 export const polyRunsRouter = Router({ mergeParams: true });
@@ -25,7 +25,7 @@ const props = z
 
 export const featureInput = z.object({
   type: z.literal('Feature').optional(),
-  geometry: geometrySchema,
+  geometry: lineGeometry, // PT41 — a poly run is a real line
   properties: props,
 });
 

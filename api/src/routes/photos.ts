@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
 import { createPhotoStore } from '../storage/index.js';
+import { log } from '../middleware/observability.js';
 
 export const photosRouter = Router();
 
@@ -99,12 +100,10 @@ photosRouter.post(
   // then evaporates is worse than one that is refused with a reason.
   (_req, _res, next) => {
     if (store.unavailable) {
-      next(
-        new HttpError(
-          503,
-          `Photo storage is unavailable on this deployment (${store.unavailable})`,
-        ),
-      );
+      // PT41 — the reason (env var names, a filesystem path) is for the
+      // operator's log, not the caller; the caller gets a stable sentence.
+      log({ level: 'warn', msg: 'photo upload refused: storage unavailable', reason: store.unavailable });
+      next(new HttpError(503, 'Photo storage is unavailable on this deployment.'));
       return;
     }
     next();

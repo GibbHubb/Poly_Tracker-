@@ -13,6 +13,76 @@ export const geometrySchema = z.object({
 
 export type Geometry = z.infer<typeof geometrySchema>;
 
+// ---------------------------------------------------------------------------
+// PT41 — per-kind geometry that is actually a shape.
+//
+// `geometrySchema` above checks only the type name; PostGIS then accepted a
+// polygon of two points (`[[0,0],[1,1]]`) and stored it with area 0, and a
+// paddock could be a Point. Each route now takes only its own kind, with rings
+// and lines that can be drawn. Validation lives here so the import route
+// reports the same reasons per row.
+// ---------------------------------------------------------------------------
+
+const position = z
+  .tuple([z.number().finite(), z.number().finite()])
+  .rest(z.number().finite())
+  .refine(([lng, lat]) => lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90, {
+    message: 'coordinates must be [longitude, latitude] within -180..180 and -90..90',
+  });
+type Position = z.infer<typeof position>;
+
+const samePos = (a: Position, b: Position) => a[0] === b[0] && a[1] === b[1];
+const distinctCount = (ps: Position[]) => new Set(ps.map((p) => `${p[0]},${p[1]}`)).size;
+
+/**
+ * Planar shoelace area in degrees²; only its being non-zero matters here.
+ * Taken about the first corner: at lng ~150 the raw products carry ~1e-12 of
+ * rounding noise, the same size as the threshold.
+ */
+function ringArea(ring: Position[]): number {
+  const [x0, y0] = ring[0]!;
+  let a = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    a += (ring[i]![0] - x0) * (ring[i + 1]![1] - y0) - (ring[i + 1]![0] - x0) * (ring[i]![1] - y0);
+  }
+  return Math.abs(a / 2);
+}
+
+export const pointGeometry = z.object({
+  type: z.literal('Point'),
+  coordinates: position,
+});
+
+export const lineGeometry = z.object({
+  type: z.literal('LineString'),
+  coordinates: z
+    .array(position)
+    .min(2, 'a line needs at least 2 points')
+    .refine((ps) => distinctCount(ps) >= 2, { message: 'a line needs 2 different points' }),
+});
+
+const ring = z
+  .array(position)
+  .min(4, 'a polygon ring needs at least 4 positions (3 corners + the closing point)')
+  .refine((r) => samePos(r[0]!, r[r.length - 1]!), { message: 'a polygon ring must be closed (first point = last point)' })
+  .refine((r) => distinctCount(r) >= 3, { message: 'a polygon needs at least 3 different corners' });
+
+export const polygonGeometry = z.object({
+  type: z.literal('Polygon'),
+  coordinates: z
+    .array(ring)
+    .min(1, 'a polygon needs an outer ring')
+    .refine((rings) => ringArea(rings[0]!) > 1e-12, { message: 'a polygon must enclose an area (its corners are in a line)' }),
+});
+
+/** One-line, user-facing summary of a geometry/properties validation failure. */
+export function describeZodIssues(err: z.ZodError): string {
+  return err.issues
+    .slice(0, 3)
+    .map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
+    .join('; ');
+}
+
 /**
  * Loose FeatureCollection schema for bulk import (PT19). Geometry is validated
  * only enough to route by type here (any geometry type is allowed through so

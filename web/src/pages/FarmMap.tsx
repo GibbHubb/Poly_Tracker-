@@ -31,6 +31,7 @@ import { withClustersOff } from '../lib/clusters';
 import { formatArea, formatLength } from '../lib/units';
 import { useFarmData } from '../hooks/useFarmData';
 import { forExport } from '../lib/pendingOverlay';
+import { geometryProblem, normaliseLongitudes } from '../lib/geometryCheck';
 import { describeError, isNetworkError, notify, reportError, shouldQueue } from '../lib/notify';
 
 const EMPTY: GeoJsonFeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -199,10 +200,17 @@ export function FarmMap() {
   // Geometry type decides the collection: Polygon→paddock, Line→poly run,
   // Point→generic feature. The drawn shape opens the name/colour dialog.
   const handleCreate = useCallback((drawn: GeoJsonFeature) => {
-    const t = drawn.geometry?.type;
+    // PT41 — a shape the API would refuse never reaches the dialog or the queue.
+    const geometry = drawn.geometry ? normaliseLongitudes(drawn.geometry) : null;
+    const problem = geometryProblem(geometry);
+    if (problem) {
+      notify('error', `${problem} Draw it again.`);
+      return;
+    }
+    const t = geometry?.type;
     const kind: DrawKind =
       t === 'Polygon' ? 'paddock' : t === 'LineString' ? 'polyRun' : 'feature';
-    setPending({ kind, geometry: drawn.geometry });
+    setPending({ kind, geometry });
   }, []);
 
   // Dialog confirmed: persist with name/colour (+ type for points), falling

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
 import { parseIfMatch, setVersionETag, throwUpdateConflict } from '../lib/concurrency.js';
-import { bboxPredicate, bboxSchema, geometrySchema, rowsToCollection, rowToFeature } from '../lib/geojson.js';
+import { bboxPredicate, bboxSchema, pointGeometry, rowsToCollection, rowToFeature } from '../lib/geojson.js';
 
 // mergeParams: mounted at /api/farms/:farmId/features
 export const featuresRouter = Router({ mergeParams: true });
@@ -21,7 +21,7 @@ export const featureType = z.enum([
 
 export const featureInput = z.object({
   type: z.literal('Feature').optional(),
-  geometry: geometrySchema,
+  geometry: pointGeometry, // PT41 — a point is a valid position
   properties: z
     .object({
       type: featureType,

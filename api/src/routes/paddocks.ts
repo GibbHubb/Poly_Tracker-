@@ -3,7 +3,7 @@ import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { query } from '../db.js';
 import { asyncHandler, HttpError } from '../middleware/index.js';
-import { bboxPredicate, bboxSchema, geometrySchema, rowsToCollection, rowToFeature } from '../lib/geojson.js';
+import { bboxPredicate, bboxSchema, polygonGeometry, rowsToCollection, rowToFeature } from '../lib/geojson.js';
 import { parseIfMatch, setVersionETag, throwUpdateConflict } from '../lib/concurrency.js';
 
 // mergeParams: mounted at /api/farms/:farmId/paddocks
@@ -11,7 +11,7 @@ export const paddocksRouter = Router({ mergeParams: true });
 
 export const featureInput = z.object({
   type: z.literal('Feature').optional(),
-  geometry: geometrySchema,
+  geometry: polygonGeometry, // PT41 — a paddock is a real polygon
   properties: z
     .object({
       name: z.string().min(1),

@@ -13,14 +13,15 @@ export default defineConfig({
       reporter: ['text-summary', 'text'],
       // A FLOOR, set to what the suite achieved on 2026-10-02 (rounded down).
       // It may only go up: raise it when coverage rises, never lower it to pass.
-      // Measured 52.04 / 85.28 / 62.13 / 52.04. The low line figure is honest:
+      // Measured 52.04 / 85.28 / 62.13 / 52.04 (PT36); raised to 57.89 / 85.37 /
+      // 67.22 / 57.89 by PT41's circle-mode tests. The low line figure is honest:
       // mapStyle, exportPdf, circleMode, tileCache and downscale need WebGL, a
       // canvas or Cache Storage and are verified in a browser, not here.
       thresholds: {
-        lines: 52,
-        statements: 52,
+        lines: 57,
+        statements: 57,
         branches: 85,
-        functions: 62,
+        functions: 67,
       },
     },
   },

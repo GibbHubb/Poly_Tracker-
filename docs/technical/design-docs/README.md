@@ -18,4 +18,4 @@ Copy [`_template.md`](_template.md) → `NN-short-name.md`, fill it, get it revi
 
 | Doc | Status | Description |
 |-----|--------|-------------|
-| <!-- TODO --> | <!-- Draft / Approved / Implemented --> | <!-- one line --> |
+| _none yet_ | — | Designs so far live in the `PT*` plans (`backlog_bandit/plans/poly_tracker/`), e.g. PT21 (the Vercel re-platform) and PT24 (photo storage). |

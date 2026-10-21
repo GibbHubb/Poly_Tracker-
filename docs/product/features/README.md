@@ -6,7 +6,7 @@ One PRD per feature. Copy [`_template.md`](_template.md) → `NN-short-name.md`,
 
 | PRD | Status | Description |
 |-----|--------|-------------|
-| <!-- TODO: 01-example.md --> | <!-- Draft / Building / Shipped --> | <!-- one line --> |
+| _none yet_ | — | Features so far were specified as `PT*` tickets with plans in `backlog_bandit/plans/poly_tracker/`; write a PRD here for the next feature big enough to need one. |
 
 ## Convention
 

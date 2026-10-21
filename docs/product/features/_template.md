@@ -1,57 +1,57 @@
-# Feature: <!-- TODO: Feature name -->
+# Feature: <!-- FILL: Feature name -->
 
 ## Summary
 
-<!-- TODO: One paragraph describing the feature -->
+<!-- FILL: One paragraph describing the feature -->
 
 ## Problem and context
 
-<!-- TODO: What problem does this solve? What is the current state? -->
+<!-- FILL: What problem does this solve? What is the current state? -->
 
 ## Target user
 
-<!-- TODO: Who is the primary user of this feature? -->
+<!-- FILL: Who is the primary user of this feature? -->
 
 ## Goals
 
-<!-- TODO: What must be true for this feature to be successful? -->
+<!-- FILL: What must be true for this feature to be successful? -->
 
 ## Non-goals
 
-<!-- TODO: What is explicitly out of scope for this feature? -->
+<!-- FILL: What is explicitly out of scope for this feature? -->
 
 ## Success metrics
 
-<!-- TODO: How will we measure success? -->
+<!-- FILL: How will we measure success? -->
 
 ## User flows
 
-<!-- TODO: Step-by-step user interactions, or link to diagrams -->
+<!-- FILL: Step-by-step user interactions, or link to diagrams -->
 
 ## Scope
 
 ### In
 
-<!-- TODO: What is included -->
+<!-- FILL: What is included -->
 
 ### Out
 
-<!-- TODO: What is excluded -->
+<!-- FILL: What is excluded -->
 
 ### Deferred
 
-<!-- TODO: What is pushed to a later iteration -->
+<!-- FILL: What is pushed to a later iteration -->
 
 ## Open questions
 
-<!-- TODO: Unresolved decisions or unknowns -->
+<!-- FILL: Unresolved decisions or unknowns -->
 
 ## Dependencies
 
-<!-- TODO: Other features, services, or teams this depends on -->
+<!-- FILL: Other features, services, or teams this depends on -->
 
 ## Changelog
 
 | Date | Author | Note |
 |------|--------|------|
-| <!-- TODO --> | <!-- TODO --> | <!-- TODO: Initial draft --> |
+| <!-- FILL --> | <!-- FILL --> | <!-- FILL: Initial draft --> |

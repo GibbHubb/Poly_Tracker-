@@ -4,22 +4,31 @@ Mobile-first, offline-capable GIS web app for tracking poly pipe runs, water
 troughs, turkey nests, bores, and paddock boundaries on cattle farms. Draw
 features on a satellite map; export high-resolution PDF maps for documentation.
 
+- **Production** runs on Vercel (SPA + the API as one serverless function) against Supabase:
+  **https://poly-tracker-ashy.vercel.app**. How it is deployed: **[DEPLOY.md](DEPLOY.md)**.
+- **Local development** runs the same code in Docker Compose (below).
+- Docs: [architecture](docs/technical/architecture.md) · [API](docs/technical/api.md) ·
+  [data model](docs/technical/data-model.md) · [vision](docs/product/vision.md) ·
+  [roadmap](docs/product/roadmap.md).
+
 ## Stack
 
 | Layer    | Tech |
 |----------|------|
 | Frontend | React 18 + Vite + TypeScript, MapLibre GL JS, mapbox-gl-draw, Tailwind, Workbox PWA, Dexie, React Router, Zustand |
-| Backend  | Node 20 + Express + TypeScript, node-postgres, Zod, Multer, Puppeteer |
+| Backend  | Node 20 + Express + TypeScript, node-postgres, Zod, Multer (PDF export is client-side jsPDF) |
 | Database | PostgreSQL 16 + PostGIS 3.4 (all geometries SRID 4326) |
-| Infra    | Docker Compose: `db`, `api`, `web`, `nginx` |
+| Infra    | Production: Vercel + Supabase (Postgres + Storage). Local: Docker Compose (`db`, `api`, `web`, `nginx`) |
 
-## Prerequisites
+## Local development
+
+### Prerequisites
 
 - Docker Desktop / Docker Engine 24+ with Compose v2
 - A Mapbox access token (free tier is fine) — see below
-- ~2 GB free disk (the API image bundles Chromium for PDF export)
+- ~1 GB free disk for the images
 
-## Get a Mapbox token
+### Get a Mapbox token
 
 1. Sign up at <https://account.mapbox.com/>.
 2. Open <https://account.mapbox.com/access-tokens/>.
@@ -27,7 +36,7 @@ features on a satellite map; export high-resolution PDF maps for documentation.
    default public scopes.
 4. Paste it into `.env` as `MAPBOX_TOKEN`.
 
-## Env setup
+### Env setup
 
 ```bash
 cp .env.example .env
@@ -42,7 +51,7 @@ cp .env.example .env
 | `WEB_PORT` | Vite dev server port | `5173` |
 | `PHOTO_STORAGE_PATH` | Photo upload dir in the api container | `/data/photos` |
 
-## First run
+### First run
 
 ```bash
 docker compose up --build
@@ -50,7 +59,7 @@ docker compose up --build
 
 Then open **<http://localhost:8080>** (nginx single-origin entrypoint).
 
-### Dev vs prod
+### Dev vs prod compose
 
 - **Dev** (above): `docker compose up --build` — Vite dev server with HMR
   behind nginx, source bind-mounted.
@@ -69,7 +78,7 @@ Then open **<http://localhost:8080>** (nginx single-origin entrypoint).
 Direct service ports (bypassing nginx) are also exposed: web `:5173`,
 api `:3001`, db `:5432`.
 
-## Dev workflow
+### Dev workflow
 
 - Source is bind-mounted; Vite HMR and `tsx watch` reload on change.
 - `docker compose logs -f api` / `web` to tail a service.
@@ -82,14 +91,14 @@ api `:3001`, db `:5432`.
   After a schema change: `docker compose down -v && docker compose up --build`
   (this wipes data — fine pre-production).
 
-## PDF export
+### PDF export
 
 Fully client-side (jsPDF) — the **Export PDF** button captures the live
 MapLibre canvas exactly as shown (current centre/zoom/basemap + all rendered
 features) and builds an A3-landscape PDF with a header and a grouped feature
-list. No server/Puppeteer; the export always matches the on-screen view.
+list. Nothing is rendered on the server; the export always matches the on-screen view.
 
-## Offline
+### Offline
 
 - The Workbox service worker precaches the app shell and caches Mapbox tiles
   (StaleWhileRevalidate, ~100 tiles/zoom) plus API GETs.
@@ -98,22 +107,17 @@ list. No server/Puppeteer; the export always matches the on-screen view.
 - An online/offline badge with the pending-mutation count is in the header;
   manual sync + queue controls live in **Settings**.
 
-## Deployment notes
+## Self-hosting instead of Vercel
 
-- The `web` container runs the Vite **dev** server for this first pass. For
-  production, build the SPA (`npm run build` in `web`) and serve the static
-  `dist/` from nginx; point nginx `location /` at the built assets instead of
-  `web:5173`, and keep `/api/` proxied to the api service.
-- Put real Postgres credentials in `.env`; never commit `.env`.
-- Persist the `db_data` and `photo_data` volumes (or back them up).
-- Terminate TLS at nginx (or an upstream LB) in production — the service
-  worker and geolocation require a secure context off `localhost`.
+Production is Vercel + Supabase ([DEPLOY.md](DEPLOY.md)). To run the whole stack on your own
+machine instead, use `docker-compose.prod.yml` (above), persist the `db_data` and `photo_data`
+volumes, keep `PHOTO_BACKEND` unset (disk storage), and terminate TLS in front of nginx: the
+service worker and geolocation need a secure context off `localhost`.
 
-## Public access (Cloudflare named tunnel)
+### Public access (Cloudflare named tunnel)
 
-To expose the local stack on a **stable public URL** (survives restarts), use a
-Cloudflare *named* tunnel. This is the supported way to put Poly_Tracker online —
-quick tunnels (`*.trycloudflare.com`) get a new random URL every launch and are
+To expose a self-hosted stack on a **stable public URL** (survives restarts), use a Cloudflare
+*named* tunnel. Quick tunnels (`*.trycloudflare.com`) get a new random URL every launch and are
 not persisted.
 
 One-time setup (Cloudflare Zero Trust dashboard):
@@ -136,7 +140,7 @@ The app is then live at the hostname you configured (e.g.
 `https://poly.yourdomain.com`). `cloudflared` install:
 `winget install Cloudflare.cloudflared`.
 
-### Quick tunnel (no domain, throwaway URL)
+#### Quick tunnel (no domain, throwaway URL)
 
 If you don't have a domain on Cloudflare yet, use a **quick tunnel** — no
 account/token needed. It prints a random `*.trycloudflare.com` URL that lives
@@ -152,5 +156,5 @@ Cloudflare.
 
 ## Repo layout
 
-See the tree in the project brief. Key entrypoints: `api/src/index.ts`,
+Key entrypoints: `api/src/index.ts`,
 `web/src/main.tsx`, `db/init/02_schema.sql`, `nginx/nginx.conf`.

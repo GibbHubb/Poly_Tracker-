@@ -35,6 +35,8 @@ const metaInput = z.object({
   taken_at: z.string().nullish(),
   lat: z.coerce.number().nullish(),
   lng: z.coerce.number().nullish(),
+  // PT38 — the uploader's queue-row uuid, the same on every retry of one photo.
+  client_id: z.string().uuid().nullish(),
 });
 
 interface PhotoRow {
@@ -45,6 +47,7 @@ interface PhotoRow {
   taken_at: string | null;
   lat: string | null;
   lng: string | null;
+  client_id: string | null;
 }
 
 photosRouter.get(
@@ -112,6 +115,16 @@ photosRouter.post(
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'photo file is required');
     const meta = metaInput.parse(req.body);
+    const clientId = meta.client_id ?? null;
+    // PT38 — a retry of a photo we already have (its first reply was lost):
+    // answer with that row, and store nothing a second time.
+    if (clientId) {
+      const { rows: seen } = await query<PhotoRow>('SELECT * FROM photos WHERE client_id = $1', [clientId]);
+      if (seen[0]) {
+        res.status(200).json(seen[0]);
+        return;
+      }
+    }
     // Store the bytes BEFORE the row: a row pointing at an object that was
     // never written is a broken image with no way to tell; an object with no
     // row is an orphan. Nothing reclaims orphans today and one can be up to
@@ -123,8 +136,9 @@ photosRouter.post(
       req.file.mimetype,
     );
     const { rows } = await query<PhotoRow>(
-      `INSERT INTO photos (feature_type, feature_id, path, taken_at, lat, lng)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      `INSERT INTO photos (feature_type, feature_id, path, taken_at, lat, lng, client_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (client_id) DO NOTHING RETURNING *`,
       [
         meta.feature_type ?? null,
         meta.feature_id ?? null,
@@ -132,8 +146,17 @@ photosRouter.post(
         meta.taken_at ?? null,
         meta.lat ?? null,
         meta.lng ?? null,
+        clientId,
       ],
     );
+    if (!rows[0]) {
+      // Two attempts of the same photo raced past the check above; the other
+      // one's row won. Drop the object we just stored and answer with theirs.
+      await store.remove(key);
+      const { rows: winner } = await query<PhotoRow>('SELECT * FROM photos WHERE client_id = $1', [clientId]);
+      res.status(200).json(winner[0]);
+      return;
+    }
     res.status(201).json(rows[0]);
   }),
 );

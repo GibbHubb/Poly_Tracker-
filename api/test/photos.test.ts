@@ -149,3 +149,44 @@ describe('photos — storage unavailable', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// PT38 — a retry of an upload whose reply was lost must not become a second photo.
+// ---------------------------------------------------------------------------
+describe('photos — client_id makes an upload retry-safe (PT38)', () => {
+  const CID = '0b9f6a52-7c1e-4d8a-9f3b-2e4c6a8d0f11';
+  const send = (clientId?: string) => {
+    const r = request(app).post('/api/photos');
+    if (clientId) r.field('client_id', clientId);
+    return r.attach('photo', JPEG, { filename: 'p.jpg', contentType: 'image/jpeg' });
+  };
+
+  it('a repeat of the same client_id answers 200 with the SAME row, and stores nothing new', async () => {
+    const first = await send(CID);
+    expect(first.status).toBe(201);
+    const again = await send(CID);
+    expect(again.status).toBe(200);
+    expect(again.body.id).toBe(first.body.id);
+    expect(again.body.path).toBe(first.body.path);
+    expect(await photoCount()).toBe(1);
+  });
+
+  it('two attempts racing each other still leave ONE row', async () => {
+    const [a, b] = await Promise.all([send(CID), send(CID)]);
+    expect([a.status, b.status].sort()).toEqual([200, 201]);
+    expect(a.body.id).toBe(b.body.id);
+    expect(await photoCount()).toBe(1);
+  });
+
+  it('uploads without a client_id (an older bundle) behave as before', async () => {
+    expect((await send()).status).toBe(201);
+    expect((await send()).status).toBe(201);
+    expect(await photoCount()).toBe(2);
+  });
+
+  it('a malformed client_id is a 400, not a stored photo', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect((await send('not-a-uuid')).status).toBe(400);
+    expect(await photoCount()).toBe(0);
+  });
+});

@@ -148,8 +148,13 @@ export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
       return;
     }
 
+    // PT38 — one id per photo, made before the first attempt and sent with every attempt
+    // (this one and any queued replay), so a retry of an upload whose reply was lost is
+    // recognised by the server instead of stored twice.
+    const clientId = crypto.randomUUID();
     const form = new FormData();
     form.append('photo', upload.blob, upload.filename);
+    form.append('client_id', clientId);
     if (featureType) form.append('feature_type', featureType);
     if (featureId) form.append('feature_id', featureId);
     form.append('taken_at', takenAt ?? new Date().toISOString());
@@ -191,7 +196,7 @@ export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
           lat,
           lng,
           takenAt: takenAt ?? new Date().toISOString(),
-        });
+        }, clientId);
         setStatus(`Queued (${n}) — will upload when back online${where}`);
         setQueueTick((t) => t + 1);
       } catch (err) {

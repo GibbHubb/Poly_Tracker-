@@ -132,3 +132,28 @@ describe('replayPhotoQueue — review fixes', () => {
     expect(rows[0]!.lastError).toContain('File too large');
   });
 });
+
+describe('PT38 — one photo, one client_id, on every attempt', () => {
+  it('replays with the id the online attempt already sent', async () => {
+    const onlineId = '6f1c2b8e-1d2a-4c3b-9e4f-5a6b7c8d9e0f';
+    const { id } = await queuePhoto(meta(), onlineId);
+    expect(id).toBe(onlineId);
+    const sent: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      sent.push(String((init!.body as FormData).get('client_id')));
+      return response(200, { id: 'server-row' });
+    });
+    await replayPhotoQueue(fetchImpl as unknown as typeof fetch);
+    expect(sent).toEqual([onlineId]);
+  });
+
+  it('a photo queued without one still gets a client_id (its queue-row uuid)', async () => {
+    const { id } = await queuePhoto(meta());
+    let sent: FormDataEntryValue | null = null;
+    await replayPhotoQueue((async (_u: string, init?: RequestInit) => {
+      sent = (init!.body as FormData).get('client_id');
+      return response(201, {});
+    }) as unknown as typeof fetch);
+    expect(sent).toBe(id);
+  });
+});

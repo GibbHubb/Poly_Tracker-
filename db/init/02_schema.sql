@@ -53,7 +53,8 @@ CREATE TABLE photos (
     path         text NOT NULL,
     taken_at     timestamptz,
     lat          numeric,
-    lng          numeric
+    lng          numeric,
+    client_id    uuid  -- PT38: the uploader's queue-row id; a repeat returns the existing row
 );
 
 CREATE INDEX paddocks_geom_gist  ON paddocks  USING GIST (geom);
@@ -70,6 +71,7 @@ CREATE INDEX features_farm_idx  ON features  (farm_id);
 -- db/migrations/003_photo_and_composite_indexes.sql for the full rationale;
 -- kept in sync here so a fresh install matches a migrated one.
 CREATE INDEX photos_feature_id_idx ON photos (feature_id);
+CREATE UNIQUE INDEX photos_client_id_key ON photos (client_id);
 CREATE INDEX photos_taken_at_idx   ON photos (taken_at);
 
 CREATE INDEX paddocks_farm_created_idx  ON paddocks  (farm_id, created_at);

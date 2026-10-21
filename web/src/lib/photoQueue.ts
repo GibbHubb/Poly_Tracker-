@@ -17,10 +17,17 @@ export class PhotoQueueFullError extends Error {
 
 export type PhotoMeta = Omit<QueuedPhoto, 'id' | 'createdAt' | 'status' | 'lastError'>;
 
-export async function queuePhoto(meta: PhotoMeta): Promise<{ id: string; queued: number }> {
+/**
+ * `id` is also the photo's `client_id` on every upload (PT38). Pass the one the online
+ * attempt already sent: if that attempt reached the server and only the reply was lost,
+ * the replay is then recognised as the same photo instead of becoming a second one.
+ */
+export async function queuePhoto(
+  meta: PhotoMeta,
+  id: string = crypto.randomUUID(),
+): Promise<{ id: string; queued: number }> {
   const queued = await db.photoQueue.where('status').equals('queued').count();
   if (queued >= PHOTO_QUEUE_CAP) throw new PhotoQueueFullError();
-  const id = crypto.randomUUID();
   // Strictly increasing, so "oldest first" is defined even for two photos in the same millisecond
   // (a burst from the camera); a tie would otherwise upload in random id order.
   const last = await db.photoQueue.orderBy('createdAt').last();
@@ -34,10 +41,11 @@ export async function queuePhoto(meta: PhotoMeta): Promise<{ id: string; queued:
 
 /** The multipart body the upload endpoint expects: the same shape the online path sends. */
 export function photoForm(
-  p: Pick<QueuedPhoto, 'blob' | 'filename' | 'featureType' | 'featureId' | 'lat' | 'lng' | 'takenAt'>,
+  p: Pick<QueuedPhoto, 'id' | 'blob' | 'filename' | 'featureType' | 'featureId' | 'lat' | 'lng' | 'takenAt'>,
 ): FormData {
   const form = new FormData();
   form.append('photo', p.blob, p.filename);
+  form.append('client_id', p.id); // PT38: the server answers a repeat with the row it already has
   if (p.featureType) form.append('feature_type', p.featureType);
   form.append('feature_id', p.featureId);
   form.append('taken_at', p.takenAt);

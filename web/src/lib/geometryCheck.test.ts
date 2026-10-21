@@ -54,3 +54,18 @@ describe('shapes the app produces', () => {
     expect(geometryProblem(g)).toBeNull();
   });
 });
+
+// PT42 — the shared fixtures the API suite reads too (fixtures/geometry-cases.json).
+import type { GeoJsonGeometry } from './api';
+import sharedFixtures from '../../../fixtures/geometry-cases.json';
+
+interface SharedCase { name: string; reason: string | null; geometry: GeoJsonGeometry }
+const shared = (sharedFixtures as unknown as { cases: SharedCase[] }).cases;
+
+describe('shared geometry fixtures (draw tool)', () => {
+  it.each(shared.map((c) => [c.name, c] as const))('%s', (_name, c) => {
+    const problem = geometryProblem(c.geometry);
+    if (c.reason === null) expect(problem).toBeNull();
+    else expect(problem).toMatch(new RegExp(c.reason, 'i'));
+  });
+});

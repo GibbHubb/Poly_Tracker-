@@ -1,0 +1,34 @@
+{
+  "_comment": "PT42: one set of shapes both the API (api/test/geometryFixtures.test.ts) and the draw tool (web/src/lib/geometryCheck.test.ts) must agree on. `reason` is a case-insensitive regex the refusal must match on BOTH sides; null means the shape is accepted.",
+  "cases": [
+    { "name": "a real square paddock", "reason": null,
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.01, -26], [150.01, -26.01], [150, -26.01], [150, -26]]] } },
+    { "name": "a 1 m² paddock near lng 150", "reason": null,
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.00001, -26], [150.00001, -25.99999], [150, -26]]] } },
+    { "name": "a concave (L-shaped) paddock", "reason": null,
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.02, -26], [150.02, -26.01], [150.01, -26.01], [150.01, -26.02], [150, -26.02], [150, -26]]] } },
+    { "name": "a ring with a repeated corner", "reason": null,
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.01, -26], [150.01, -26], [150.01, -26.01], [150, -26.01], [150, -26]]] } },
+    { "name": "a real poly run", "reason": null,
+      "geometry": { "type": "LineString", "coordinates": [[150, -26], [150.1, -26]] } },
+    { "name": "a real point", "reason": null,
+      "geometry": { "type": "Point", "coordinates": [150, -26] } },
+
+    { "name": "the PT35 probe: a two-point polygon", "reason": "4 positions|3 different corners",
+      "geometry": { "type": "Polygon", "coordinates": [[[0, 0], [1, 1]]] } },
+    { "name": "an unclosed ring", "reason": "closed",
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.01, -26], [150.01, -26.01], [150, -26.01]]] } },
+    { "name": "all corners in a line", "reason": "enclose an area",
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.01, -26], [150.02, -26], [150, -26]]] } },
+    { "name": "a bow-tie (area exactly 0)", "reason": "cross itself",
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.01, -26.01], [150.01, -26], [150, -26.01], [150, -26]]] } },
+    { "name": "a Z that crosses itself and still has area", "reason": "cross itself",
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.02, -26], [150, -26.01], [150.02, -26.02], [150, -26.02], [150, -26]]] } },
+    { "name": "an outline that doubles back along an edge", "reason": "cross itself",
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.02, -26], [150.02, -26.01], [150, -26.01], [150.03, -26.01], [150.03, -26.02], [150, -26.02], [150, -26]]] } },
+    { "name": "a one-point line", "reason": "2 different points",
+      "geometry": { "type": "LineString", "coordinates": [[150, -26], [150, -26]] } },
+    { "name": "a point off the planet", "reason": "valid position|-180\\.\\.180",
+      "geometry": { "type": "Point", "coordinates": [200, -26] } }
+  ]
+}

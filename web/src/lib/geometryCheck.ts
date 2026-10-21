@@ -29,6 +29,44 @@ function ringArea(r: Pos[]): number {
   return Math.abs(a / 2);
 }
 
+// PT42 — the same self-intersection rule as api/src/lib/geojson.ts (a bow-tie's area can be
+// exactly 0, so it used to be refused as "corners in a line"). Both suites read
+// fixtures/geometry-cases.json.
+
+function orient(a: Pos, b: Pos, c: Pos): number {
+  const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  return v > 0 ? 1 : v < 0 ? -1 : 0;
+}
+
+function within(a: Pos, b: Pos, c: Pos): boolean {
+  return (
+    Math.min(a[0], b[0]) <= c[0] && c[0] <= Math.max(a[0], b[0]) &&
+    Math.min(a[1], b[1]) <= c[1] && c[1] <= Math.max(a[1], b[1])
+  );
+}
+
+function segmentsTouch(p1: Pos, p2: Pos, p3: Pos, p4: Pos): boolean {
+  const o1 = orient(p1, p2, p3), o2 = orient(p1, p2, p4), o3 = orient(p3, p4, p1), o4 = orient(p3, p4, p2);
+  if (o1 !== o2 && o3 !== o4) return true;
+  return (
+    (o1 === 0 && within(p1, p2, p3)) || (o2 === 0 && within(p1, p2, p4)) ||
+    (o3 === 0 && within(p3, p4, p1)) || (o4 === 0 && within(p3, p4, p2))
+  );
+}
+
+/** True when two non-neighbouring edges of a closed ring touch or cross. */
+function ringSelfIntersects(ring: Pos[]): boolean {
+  const r = ring.filter((p, i) => i === 0 || key(p) !== key(ring[i - 1]!));
+  const n = r.length - 1;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      if (segmentsTouch(r[i]!, r[i + 1]!, r[j]!, r[j + 1]!)) return true;
+    }
+  }
+  return false;
+}
+
 /** Wrap a longitude from a panned-onto world copy (e.g. 510) back into -180..180. */
 export function wrapLng(lng: number): number {
   return ((((lng + 180) % 360) + 360) % 360) - 180;
@@ -62,6 +100,7 @@ export function geometryProblem(g: GeoJsonGeometry | null | undefined): string |
     const r = outer as Pos[];
     if (r.length < 4 || distinct(r) < 3) return 'A paddock needs at least 3 different corners.';
     if (key(r[0]!) !== key(r[r.length - 1]!)) return 'A paddock outline must be closed.';
+    if (ringSelfIntersects(r)) return 'A paddock outline must not cross itself.';
     if (ringArea(r) <= 1e-12) return 'A paddock must enclose an area (its corners are in a line).';
     return null;
   }

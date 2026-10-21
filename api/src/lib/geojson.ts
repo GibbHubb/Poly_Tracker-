@@ -48,6 +48,48 @@ function ringArea(ring: Position[]): number {
   return Math.abs(a / 2);
 }
 
+// PT42 — a ring that crosses itself (a bow-tie) is not a paddock. Its shoelace area can be
+// exactly 0, so without this it was refused for the wrong reason ("corners are in a line"),
+// and any other crossing shape was stored. O(n²) over the ring's edges: drawn and imported
+// paddocks are tens to a few thousand corners. Mirrored in web/src/lib/geometryCheck.ts;
+// both suites read fixtures/geometry-cases.json.
+
+function orient(a: Position, b: Position, c: Position): number {
+  const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  return v > 0 ? 1 : v < 0 ? -1 : 0;
+}
+
+/** c lies within the bounding box of a–b (only asked when a, b, c are collinear). */
+function within(a: Position, b: Position, c: Position): boolean {
+  return (
+    Math.min(a[0], b[0]) <= c[0] && c[0] <= Math.max(a[0], b[0]) &&
+    Math.min(a[1], b[1]) <= c[1] && c[1] <= Math.max(a[1], b[1])
+  );
+}
+
+function segmentsTouch(p1: Position, p2: Position, p3: Position, p4: Position): boolean {
+  const o1 = orient(p1, p2, p3), o2 = orient(p1, p2, p4), o3 = orient(p3, p4, p1), o4 = orient(p3, p4, p2);
+  if (o1 !== o2 && o3 !== o4) return true;
+  return (
+    (o1 === 0 && within(p1, p2, p3)) || (o2 === 0 && within(p1, p2, p4)) ||
+    (o3 === 0 && within(p3, p4, p1)) || (o4 === 0 && within(p3, p4, p2))
+  );
+}
+
+/** True when two non-neighbouring edges of a closed ring touch or cross. */
+function ringSelfIntersects(ring: Position[]): boolean {
+  // A repeated corner makes a zero-length edge whose neighbours would look like they touch.
+  const r = ring.filter((p, i) => i === 0 || !samePos(p, ring[i - 1]!));
+  const n = r.length - 1; // edges r[i] → r[i+1]
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // first and last edge share the closing corner
+      if (segmentsTouch(r[i]!, r[i + 1]!, r[j]!, r[j + 1]!)) return true;
+    }
+  }
+  return false;
+}
+
 export const pointGeometry = z.object({
   type: z.literal('Point'),
   coordinates: position,
@@ -65,14 +107,18 @@ const ring = z
   .array(position)
   .min(4, 'a polygon ring needs at least 4 positions (3 corners + the closing point)')
   .refine((r) => samePos(r[0]!, r[r.length - 1]!), { message: 'a polygon ring must be closed (first point = last point)' })
-  .refine((r) => distinctCount(r) >= 3, { message: 'a polygon needs at least 3 different corners' });
+  .refine((r) => distinctCount(r) >= 3, { message: 'a polygon needs at least 3 different corners' })
+  .refine((r) => !ringSelfIntersects(r), { message: 'a polygon outline must not cross itself' });
 
 export const polygonGeometry = z.object({
   type: z.literal('Polygon'),
   coordinates: z
     .array(ring)
     .min(1, 'a polygon needs an outer ring')
-    .refine((rings) => ringArea(rings[0]!) > 1e-12, { message: 'a polygon must enclose an area (its corners are in a line)' }),
+    // A crossing ring already has its reason; its area says nothing more.
+    .refine((rings) => !rings[0] || ringSelfIntersects(rings[0]) || ringArea(rings[0]) > 1e-12, {
+      message: 'a polygon must enclose an area (its corners are in a line)',
+    }),
 });
 
 /** One-line, user-facing summary of a geometry/properties validation failure. */

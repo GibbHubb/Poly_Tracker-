@@ -30,6 +30,16 @@ export interface PhotoStore {
   resolve(key: string): Promise<ResolvedPhoto>;
   /** Best-effort delete. A missing object is not an error (matches ENOENT). */
   remove(key: string): Promise<void>;
+  /**
+   * PT27 — every stored object, with the same key `put` returned for it, so the
+   * orphan sweep can diff it against `photos.path`.
+   */
+  list(): Promise<StoredObject[]>;
+}
+
+export interface StoredObject {
+  key: string;
+  modifiedAt: Date;
 }
 
 export type ResolvedPhoto =

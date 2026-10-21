@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { unlink, writeFile } from 'node:fs/promises';
+import { readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import type { PhotoStore, ResolvedPhoto } from './index.js';
+import type { PhotoStore, ResolvedPhoto, StoredObject } from './index.js';
 
 /**
  * The original behaviour, unchanged in effect: a UUID filename under
@@ -56,6 +56,17 @@ export function createDiskStore(env: NodeJS.ProcessEnv): PhotoStore {
         const code = (err as NodeJS.ErrnoException).code;
         if (code !== 'ENOENT') console.warn('[photos] unlink failed for', key, err);
       }
+    },
+    async list(): Promise<StoredObject[]> {
+      // Keys are the absolute paths `put` returned, so they compare directly
+      // against photos.path.
+      const out: StoredObject[] = [];
+      for (const entry of await readdir(root, { withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        const key = join(root, entry.name);
+        out.push({ key, modifiedAt: (await stat(key)).mtime });
+      }
+      return out;
     },
   };
 }

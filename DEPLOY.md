@@ -134,6 +134,11 @@ branch-scoped environment variable so only that branch is affected.
   60-second signed URL, so the key never reaches a browser and no frontend URL
   changed. Verify with `backlog_bandit/scripts/pt24_verify.py` (API, includes a
   real process restart) and `pt24_browser.py` (the image actually painting).
+- **Orphaned photo objects (PT27).** A failed insert after a stored upload leaves
+  an object no row points at. `cd api && npx tsx scripts/sweep-photos.ts` (same
+  env as the API) lists them; `--apply` removes those older than 24 h. It refuses
+  to apply when `photos` is empty but the bucket is not (the wrong-database
+  shape) unless `--allow-empty-table`. Not scheduled: run it by hand.
 - **The basemap does not fall back.** With `VITE_MAPBOX_TOKEN` unset the app
   still asks Mapbox with an empty `access_token` and the map goes blank — Esri
   is a provider you *choose* in the layer switcher, not an automatic fallback

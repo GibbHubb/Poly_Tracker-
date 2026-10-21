@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
-import type { PhotoStore, ResolvedPhoto } from './index.js';
+import type { PhotoStore, ResolvedPhoto, StoredObject } from './index.js';
 
 /**
  * Supabase Storage over its REST API.
@@ -87,6 +87,30 @@ export function createSupabaseStore(env: NodeJS.ProcessEnv): PhotoStore {
       } catch (err) {
         console.warn(`[photos] delete failed for ${objectKey}:`, err);
       }
+    },
+    async list(): Promise<StoredObject[]> {
+      // Objects sit at the bucket root (put never adds a prefix). The list API
+      // pages at `limit`; a short page is the last one.
+      const PAGE = 1000;
+      const out: StoredObject[] = [];
+      for (let offset = 0; ; offset += PAGE) {
+        const res = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
+          method: 'POST',
+          headers: { ...auth, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefix: '', limit: PAGE, offset, sortBy: { column: 'name', order: 'asc' } }),
+        });
+        if (!res.ok) {
+          console.error(`[photos] list failed: HTTP ${res.status}`, await res.text());
+          throw new Error('Could not list stored photos.');
+        }
+        const page = (await res.json()) as { name: string; id: string | null; updated_at?: string; created_at?: string }[];
+        for (const o of page) {
+          if (o.id === null) continue; // a folder placeholder, not an object
+          out.push({ key: o.name, modifiedAt: new Date(o.updated_at ?? o.created_at ?? 0) });
+        }
+        if (page.length < PAGE) break;
+      }
+      return out;
     },
   };
 }

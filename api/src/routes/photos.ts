@@ -127,9 +127,7 @@ photosRouter.post(
     }
     // Store the bytes BEFORE the row: a row pointing at an object that was
     // never written is a broken image with no way to tell; an object with no
-    // row is an orphan. Nothing reclaims orphans today and one can be up to
-    // the 25 MB limit, so if uploads ever fail often this needs a sweeper
-    // (tracked as PT27).
+    // row is an orphan, reclaimed by `scripts/sweep-photos.ts` (PT27).
     const key = await store.put(
       req.file.buffer,
       extname(req.file.originalname),

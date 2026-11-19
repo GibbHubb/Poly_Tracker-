@@ -100,7 +100,7 @@ try {
   } else {
     const schema = await readFile(join(initDir, '02_schema.sql'), 'utf8');
     await client.query(schema);
-    console.log('✓ schema applied (5 tables + GIST indexes, SRID 4326)');
+    console.log('✓ schema applied (6 tables + GIST indexes, SRID 4326)');
   }
 
   // Fail with the ACTUAL reason rather than a raw 42501 stack. The first live

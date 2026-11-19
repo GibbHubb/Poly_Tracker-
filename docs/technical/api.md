@@ -17,7 +17,8 @@ Written from `api/src/index.ts`, `api/src/middleware/index.ts` and `api/src/rout
 
 ## Authentication
 
-There are no user accounts yet (planned: PT33). Access is a **bearer-token gate with two tiers**
+Two modes. **Token mode** is the default and is what runs unless `AUTH_USERS=on`; **users mode**
+(PT33) is below it. In token mode access is a **bearer-token gate with two tiers**
 (`requireToken`, applied to every route except `/api/health`):
 
 | Configured on the server | Reads (GET/HEAD/OPTIONS) | Writes (POST/PATCH/PUT/DELETE) |
@@ -29,6 +30,40 @@ There are no user accounts yet (planned: PT33). Access is a **bearer-token gate 
 
 The comparison is constant-time. Tokens do not expire; changing the env var is the only way to
 revoke one.
+
+### Users mode (`AUTH_USERS=on`, PT33)
+
+A person signs in with a Supabase magic link (implicit flow) in the SPA, which posts the access
+token once to `POST /api/auth/session`; the API verifies it and sets its own `pt_session` cookie
+(`HttpOnly; SameSite=Lax; Path=/api; Secure` in production; 30 days). Every request then resolves
+an identity in this order: session cookie, `Authorization: Bearer <Supabase JWT>`, legacy
+write/read token (kept for one release; sees every farm), else **401**. Reads are locked too.
+
+Supabase JWTs are verified against the project's JWKS (`$SUPABASE_URL/auth/v1/.well-known/jwks.json`,
+ES256 on the shared project as of 2026-11-17); HS256 only if `SUPABASE_JWT_SECRET` is set. Checked:
+signature, `exp`, `aud=authenticated`, `role=authenticated`, `iss=$SUPABASE_URL/auth/v1`, `sub` a uuid.
+
+Authorisation is the `farm_members(farm_id, user_id, role)` table, read on every request, so
+revoking a person is deleting their row. Roles: `viewer` reads, `editor` also writes, `owner` also
+deletes the farm and manages members. No membership, or no such farm, is **404** (existence is not
+leaked); membership with too low a role is **403**. Creating a farm makes the creator its owner.
+Photos belong to a farm through their feature: a signed-in upload must name a `feature_id` on a
+farm the caller can edit, and `GET /api/photos/file/:id` is authorised by the cookie, which is
+what lets an `<img>` load it.
+
+| Route | Who |
+|---|---|
+| `GET /api/auth/config` | anyone: `{ users_mode, supabase_url, supabase_publishable_key }` |
+| `POST /api/auth/session` `{ access_token }` | anyone with a valid Supabase token → **201** + cookie |
+| `DELETE /api/auth/session` | clears the cookie |
+| `GET /api/auth/me` | the resolved identity, or **401** |
+| `GET /api/farms/:farmId/members` | any member |
+| `POST /api/farms/:farmId/members` `{ user_id, role }` | owner |
+| `DELETE /api/farms/:farmId/members/:userId` | owner, or the member themself; the last owner cannot be removed (**409**) |
+
+CORS: `CORS_ORIGINS` (comma-separated) allows those origins with credentials. Unset, users mode
+sends no `Access-Control-Allow-Origin` at all (same origin only) and token mode keeps `*`. A
+cookie-authenticated write whose `Origin` is another host is refused with **403**.
 
 ## Errors
 

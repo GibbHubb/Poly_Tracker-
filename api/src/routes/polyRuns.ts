@@ -175,7 +175,7 @@ polyRunsRouter.patch(
     );
     if (rows.length === 0) {
       if (expected !== null) {
-        await throwUpdateConflict('poly_runs', req.params.runId, expected, 'Poly run not found');
+        await throwUpdateConflict('poly_runs', req.params.runId, expected, 'Poly run not found', req.params.farmId);
       }
       throw new HttpError(404, 'Poly run not found');
     }

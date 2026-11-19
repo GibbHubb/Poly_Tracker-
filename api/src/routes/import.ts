@@ -6,6 +6,7 @@ import { asyncHandler, HttpError } from '../middleware/index.js';
 import { ZodError } from 'zod';
 import { describeZodIssues, featureCollectionSchema, type ImportFeature } from '../lib/geojson.js';
 import { log } from '../middleware/observability.js';
+import { assertFarmAccess } from '../middleware/authorize.js';
 import { featureInput as paddockInput, insertPaddockTx } from './paddocks.js';
 import { featureInput as polyRunInput, insertPolyRunTx } from './polyRuns.js';
 import { featureInput as pointInput, insertFeatureTx } from './features.js';
@@ -92,6 +93,8 @@ importRouter.post(
     if (!req.file) throw new HttpError(400, 'GeoJSON file is required (form field "file")');
     const farmId = typeof req.body.farm_id === 'string' ? req.body.farm_id : '';
     if (!farmId) throw new HttpError(400, 'farm_id is required');
+    // PT33 — importing writes into the farm; same rule as any other write.
+    await assertFarmAccess(res, farmId, 'write');
 
     let parsed: unknown;
     try {

@@ -138,7 +138,7 @@ paddocksRouter.patch(
     );
     if (rows.length === 0) {
       if (expected !== null) {
-        await throwUpdateConflict('paddocks', req.params.paddockId, expected, 'Paddock not found');
+        await throwUpdateConflict('paddocks', req.params.paddockId, expected, 'Paddock not found', req.params.farmId);
       }
       throw new HttpError(404, 'Paddock not found');
     }

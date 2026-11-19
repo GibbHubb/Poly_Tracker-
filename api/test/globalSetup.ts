@@ -18,6 +18,7 @@ export default async function setup() {
 
   // Drop all tables so the schema SQL can run cleanly each time.
   await client.query(`
+    DROP TABLE IF EXISTS farm_members CASCADE;
     DROP TABLE IF EXISTS photos      CASCADE;
     DROP TABLE IF EXISTS features    CASCADE;
     DROP TABLE IF EXISTS poly_runs   CASCADE;

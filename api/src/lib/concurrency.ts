@@ -66,12 +66,19 @@ export async function throwUpdateConflict(
   id: string | string[] | undefined,
   expectedVersion: number,
   notFoundMessage: string,
+  // PT33 — for a farm's child record, the farm in the URL. Without it a caller
+  // allowed on farm A could PATCH /farms/A/paddocks/<B's paddock id> with an
+  // If-Match and read B's row version (and its existence) out of the 412.
+  farmId?: string | string[],
 ): Promise<never> {
   const rowId = Array.isArray(id) ? id[0] : id;
   if (rowId === undefined) throw new HttpError(404, notFoundMessage);
+  const farm = Array.isArray(farmId) ? farmId[0] : farmId;
   const { rows } = await query<{ version: number }>(
-    `SELECT version FROM ${table} WHERE id = $1`,
-    [rowId],
+    farm !== undefined
+      ? `SELECT version FROM ${table} WHERE id = $1 AND farm_id = $2`
+      : `SELECT version FROM ${table} WHERE id = $1`,
+    farm !== undefined ? [rowId, farm] : [rowId],
   );
   if (rows.length === 0) throw new HttpError(404, notFoundMessage);
 

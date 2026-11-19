@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { PhotoStore, ResolvedPhoto, StoredObject } from './index.js';
+import { isStoredObjectName } from './objectName.js';
 
 /**
  * The original behaviour, unchanged in effect: a UUID filename under
@@ -62,9 +63,20 @@ export function createDiskStore(env: NodeJS.ProcessEnv): PhotoStore {
       // against photos.path.
       const out: StoredObject[] = [];
       for (const entry of await readdir(root, { withFileTypes: true })) {
-        if (!entry.isFile()) continue;
+        // PT44 — only what `put` wrote. The sweep removes whatever this returns,
+        // and the root can hold a .gitkeep, a backup or an operator's file.
+        if (!entry.isFile() || !isStoredObjectName(entry.name)) continue;
         const key = join(root, entry.name);
-        out.push({ key, modifiedAt: (await stat(key)).mtime });
+        let modifiedAt: Date;
+        try {
+          modifiedAt = (await stat(key)).mtime;
+        } catch (err) {
+          // PT44 — deleted since readdir (a concurrent DELETE). Gone is gone;
+          // one vanished file must not abort the whole listing.
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw err;
+        }
+        out.push({ key, modifiedAt });
       }
       return out;
     },

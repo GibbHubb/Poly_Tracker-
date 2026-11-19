@@ -7,7 +7,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db, pendingCount } from './db';
-import { MAX_SERVER_ERRORS, PHOTO_QUEUE_CAP, PhotoQueueFullError, queuePhoto, replayPhotoQueue } from './photoQueue';
+import { MAX_SERVER_ERRORS, PHOTO_QUEUE_CAP, PhotoQueueFullError, TRANSIENT_4XX, queuePhoto, replayPhotoQueue } from './photoQueue';
 
 const meta = (over: Partial<Parameters<typeof queuePhoto>[0]> = {}) => ({
   blob: new Blob([new Uint8Array(1234)], { type: 'image/jpeg' }),
@@ -104,6 +104,18 @@ describe('replayPhotoQueue', () => {
 });
 
 describe('replayPhotoQueue — review fixes', () => {
+  // PT44 review — a 409 (this client_id already belongs to a photo on another feature) can never
+  // succeed by waiting, so it must fail once, not stay queued and retry forever.
+  it('treats a 409 as a refusal: failed once, never retried', async () => {
+    expect(TRANSIENT_4XX.has(409)).toBe(false);
+    await queuePhoto(meta());
+    const fetchImpl = vi.fn(async () => response(409, { error: 'This client_id already belongs to a photo on a different feature.' }));
+    expect(await replayPhotoQueue(fetchImpl as unknown as typeof fetch)).toEqual({ uploaded: 0, failed: 1 });
+    expect((await db.photoQueue.toArray())[0]!.status).toBe('failed');
+    await replayPhotoQueue(fetchImpl as unknown as typeof fetch);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps a photo queued on a transient 401 (no write token yet) instead of failing it', async () => {
     await queuePhoto(meta());
     const r = await replayPhotoQueue((async () => response(401, { error: 'missing token' })) as unknown as typeof fetch);

@@ -178,6 +178,26 @@ describe('photos — client_id makes an upload retry-safe (PT38)', () => {
     expect(await photoCount()).toBe(1);
   });
 
+  // PT45 — a reused client_id is a client bug, not a retry: say so instead of answering 200
+  // with someone else's photo and dropping this one.
+  it('a repeat client_id for a DIFFERENT feature is a 409, and stores nothing new', async () => {
+    const sendFor = (featureId: string) =>
+      request(app)
+        .post('/api/photos')
+        .field('client_id', CID)
+        .field('feature_type', 'feature')
+        .field('feature_id', featureId)
+        .attach('photo', JPEG, { filename: 'p.jpg', contentType: 'image/jpeg' });
+    const A = '3f0c1d2e-4b5a-4c6d-8e7f-9a0b1c2d3e4f';
+    const B = '7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d';
+    const first = await sendFor(A);
+    expect(first.status).toBe(201);
+    expect((await sendFor(A)).status).toBe(200); // a true retry is still fine
+    const reused = await sendFor(B);
+    expect(reused.status).toBe(409);
+    expect(await photoCount()).toBe(1);
+  });
+
   it('uploads without a client_id (an older bundle) behave as before', async () => {
     expect((await send()).status).toBe(201);
     expect((await send()).status).toBe(201);

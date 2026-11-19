@@ -1,5 +1,6 @@
 {
-  "_comment": "PT42: one set of shapes both the API (api/test/geometryFixtures.test.ts) and the draw tool (web/src/lib/geometryCheck.test.ts) must agree on. `reason` is a case-insensitive regex the refusal must match on BOTH sides; null means the shape is accepted.",
+  "_comment": "PT42: one set of shapes both the API (api/test/geometryFixtures.test.ts) and the draw tool (web/src/lib/geometryCheck.test.ts) must agree on. `reason` is a case-insensitive regex the refusal must match on BOTH sides; null means the shape is accepted. `limits` (PT45; maxPolygonRings from the PT44 review) are numbers both sides must use; each suite generates its own over-long ring from them rather than storing one here.",
+  "limits": { "maxPolygonPositions": 5000, "maxPolygonRings": 100 },
   "cases": [
     { "name": "a real square paddock", "reason": null,
       "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.01, -26], [150.01, -26.01], [150, -26.01], [150, -26]]] } },
@@ -26,6 +27,12 @@
       "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.02, -26], [150, -26.01], [150.02, -26.02], [150, -26.02], [150, -26]]] } },
     { "name": "an outline that doubles back along an edge", "reason": "cross itself",
       "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.02, -26], [150.02, -26.01], [150, -26.01], [150.03, -26.01], [150.03, -26.02], [150, -26.02], [150, -26]]] } },
+    { "name": "an empty outer ring (PT45: was a TypeError, a 500)", "reason": "4 positions|3 different corners",
+      "geometry": { "type": "Polygon", "coordinates": [[]] } },
+    { "name": "a figure-8 pinched at one corner (edges far apart in the ring touch)", "reason": "cross itself",
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26.01], [150.01, -26], [150.02, -26.01], [150.02, -25.99], [150.01, -26], [150, -25.99], [150, -26.01]]] } },
+    { "name": "a hook whose far edge cuts back across the first edge", "reason": "cross itself",
+      "geometry": { "type": "Polygon", "coordinates": [[[150, -26], [150.04, -26], [150.04, -26.02], [150.035, -26.02], [150.035, -25.99], [150.01, -25.99], [150, -26.01], [150, -26]]] } },
     { "name": "a one-point line", "reason": "2 different points",
       "geometry": { "type": "LineString", "coordinates": [[150, -26], [150, -26]] } },
     { "name": "a point off the planet", "reason": "valid position|-180\\.\\.180",

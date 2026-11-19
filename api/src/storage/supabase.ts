@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import type { PhotoStore, ResolvedPhoto, StoredObject } from './index.js';
+import { isStoredObjectName } from './objectName.js';
 
 /**
  * Supabase Storage over its REST API.
@@ -106,7 +107,13 @@ export function createSupabaseStore(env: NodeJS.ProcessEnv): PhotoStore {
         const page = (await res.json()) as { name: string; id: string | null; updated_at?: string; created_at?: string }[];
         for (const o of page) {
           if (o.id === null) continue; // a folder placeholder, not an object
-          out.push({ key: o.name, modifiedAt: new Date(o.updated_at ?? o.created_at ?? 0) });
+          // PT44 — only what `put` wrote; the sweep removes whatever this returns.
+          if (!isStoredObjectName(o.name)) continue;
+          // PT44 — no timestamp must read as "unknown age" (an Invalid Date, which
+          // the sweep treats as too new), never as the epoch, which made a fresh
+          // upload look decades old.
+          const when = o.updated_at ?? o.created_at;
+          out.push({ key: o.name, modifiedAt: when ? new Date(when) : new Date(Number.NaN) });
         }
         if (page.length < PAGE) break;
       }

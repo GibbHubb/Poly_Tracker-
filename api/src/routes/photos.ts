@@ -118,9 +118,17 @@ photosRouter.post(
     const clientId = meta.client_id ?? null;
     // PT38 — a retry of a photo we already have (its first reply was lost):
     // answer with that row, and store nothing a second time.
+    // PT45 — only if it is the SAME photo: a row with this client_id attached to a different
+    // feature means the client reused an id, and answering 200 would silently drop this photo.
+    const sameTarget = (row: PhotoRow) =>
+      (row.feature_type ?? null) === (meta.feature_type ?? null) &&
+      (row.feature_id?.toLowerCase() ?? null) === (meta.feature_id?.toLowerCase() ?? null);
+    const conflict = () =>
+      new HttpError(409, 'This client_id already belongs to a photo on a different feature.');
     if (clientId) {
       const { rows: seen } = await query<PhotoRow>('SELECT * FROM photos WHERE client_id = $1', [clientId]);
       if (seen[0]) {
+        if (!sameTarget(seen[0])) throw conflict();
         res.status(200).json(seen[0]);
         return;
       }
@@ -152,6 +160,7 @@ photosRouter.post(
       // one's row won. Drop the object we just stored and answer with theirs.
       await store.remove(key);
       const { rows: winner } = await query<PhotoRow>('SELECT * FROM photos WHERE client_id = $1', [clientId]);
+      if (winner[0] && !sameTarget(winner[0])) throw conflict();
       res.status(200).json(winner[0]);
       return;
     }

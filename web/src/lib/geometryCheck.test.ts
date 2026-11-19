@@ -61,6 +61,7 @@ import sharedFixtures from '../../../fixtures/geometry-cases.json';
 
 interface SharedCase { name: string; reason: string | null; geometry: GeoJsonGeometry }
 const shared = (sharedFixtures as unknown as { cases: SharedCase[] }).cases;
+const limits = (sharedFixtures as unknown as { limits: { maxPolygonPositions: number; maxPolygonRings: number } }).limits;
 
 describe('shared geometry fixtures (draw tool)', () => {
   it.each(shared.map((c) => [c.name, c] as const))('%s', (_name, c) => {
@@ -68,4 +69,63 @@ describe('shared geometry fixtures (draw tool)', () => {
     if (c.reason === null) expect(problem).toBeNull();
     else expect(problem).toMatch(new RegExp(c.reason, 'i'));
   });
+});
+
+// PT45 — the same size cap as the API, from the same shared number.
+import { MAX_POLYGON_POSITIONS } from './geometryCheck';
+
+describe('polygon size cap (PT45, draw tool)', () => {
+  const circle = (n: number): GeoJsonGeometry => {
+    const r: number[][] = [];
+    for (let i = 0; i < n - 1; i++) {
+      const t = (i / (n - 1)) * 2 * Math.PI;
+      r.push([150 + 0.01 * Math.cos(t), -26 + 0.01 * Math.sin(t)]);
+    }
+    r.push(r[0]!);
+    return { type: 'Polygon', coordinates: [r] };
+  };
+
+  it('uses the shared limit', () => {
+    expect(MAX_POLYGON_POSITIONS).toBe(limits.maxPolygonPositions);
+  });
+
+  it('accepts a real outline of exactly the limit', () => {
+    expect(geometryProblem(circle(limits.maxPolygonPositions))).toBeNull();
+  });
+
+  it('refuses one position over the limit, for its size', () => {
+    expect(geometryProblem(circle(limits.maxPolygonPositions + 1))).toMatch(/at most 5,000/i);
+  });
+
+  it('refuses a 150,000-position ring quickly', () => {
+    const t0 = performance.now();
+    expect(geometryProblem(circle(150_000))).toMatch(/at most 5,000/i);
+    expect(performance.now() - t0).toBeLessThan(2_000);
+  }, 10_000);
+});
+
+// PT44 review — the same ring-count cap as the API, from the same shared number.
+import { MAX_POLYGON_RINGS } from './geometryCheck';
+
+describe('polygon ring-count cap (PT44 review, draw tool)', () => {
+  it('uses the shared limit', () => {
+    expect(MAX_POLYGON_RINGS).toBe(limits.maxPolygonRings);
+  });
+
+  it('does not refuse exactly the limit for its ring count', () => {
+    const rings = Array.from({ length: limits.maxPolygonRings }, () => SQUARE);
+    expect(geometryProblem({ type: 'Polygon', coordinates: rings })).toBeNull();
+  });
+
+  it('refuses one ring over the limit', () => {
+    const rings = Array.from({ length: limits.maxPolygonRings + 1 }, () => SQUARE);
+    expect(geometryProblem({ type: 'Polygon', coordinates: rings })).toMatch(/at most 100 rings/i);
+  });
+
+  it('refuses 1.5M empty rings fast', () => {
+    const g: GeoJsonGeometry = { type: 'Polygon', coordinates: Array.from({ length: 1_500_000 }, () => []) };
+    const t0 = performance.now();
+    expect(geometryProblem(g)).toMatch(/at most 100 rings/i);
+    expect(performance.now() - t0).toBeLessThan(200);
+  }, 30_000);
 });

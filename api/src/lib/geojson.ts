@@ -50,9 +50,36 @@ function ringArea(ring: Position[]): number {
 
 // PT42 — a ring that crosses itself (a bow-tie) is not a paddock. Its shoelace area can be
 // exactly 0, so without this it was refused for the wrong reason ("corners are in a line"),
-// and any other crossing shape was stored. O(n²) over the ring's edges: drawn and imported
-// paddocks are tens to a few thousand corners. Mirrored in web/src/lib/geometryCheck.ts;
+// and any other crossing shape was stored. Mirrored in web/src/lib/geometryCheck.ts;
 // both suites read fixtures/geometry-cases.json.
+//
+// PT45 — the pairwise check is O(n²) and runs synchronously inside request parsing, and
+// express.json takes 5 MB (~150k positions), so one request could hold the event loop for
+// minutes. Three changes, all mirrored in the client:
+//   - a polygon may have at most MAX_POLYGON_POSITIONS positions across its rings, refused
+//     BEFORE any ring is examined (fixtures/geometry-cases.json `limits` pins the number);
+//   - the check runs once per ring (it ran in the ring refine AND the area refine);
+//   - edges are compared only when their x-ranges overlap (sorted by min x), which gives the
+//     same answer (two edges that touch share a point, so their x-ranges overlap) at a
+//     fraction of the pairs for any real outline.
+
+/**
+ * PT45 — the most positions a polygon may carry, all rings together. Same number in the client.
+ * 5,000, not 10,000: drawn paddocks are tens of corners (a drawn circle is 64) and imported ones
+ * "tens to a few thousand", and the worst case is quadratic. Measured on a dev laptop (Node 22):
+ * a 10,000-corner outline built so every edge's box overlaps every other took ~3.5 s; at 5,000,
+ * ~0.9 s; a real (round) 10,000-corner outline ~0.25 s.
+ */
+export const MAX_POLYGON_POSITIONS = 5_000;
+
+/**
+ * PT44 review — the most rings (outer + holes) a polygon may carry. Same number in the client;
+ * fixtures/geometry-cases.json `limits` pins both. The position cap counts positions, so 1.5M
+ * EMPTY rings passed it, and parsing each one (and building two issues per ring) took ~11 s on
+ * Node 22. Checked on the raw array before any ring is parsed: zod's `.max()` on z.array still
+ * parses every element first, so it would not help.
+ */
+export const MAX_POLYGON_RINGS = 100;
 
 function orient(a: Position, b: Position, c: Position): number {
   const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
@@ -80,10 +107,27 @@ function segmentsTouch(p1: Position, p2: Position, p3: Position, p4: Position): 
 function ringSelfIntersects(ring: Position[]): boolean {
   // A repeated corner makes a zero-length edge whose neighbours would look like they touch.
   const r = ring.filter((p, i) => i === 0 || !samePos(p, ring[i - 1]!));
-  const n = r.length - 1; // edges r[i] → r[i+1]
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 2; j < n; j++) {
-      if (i === 0 && j === n - 1) continue; // first and last edge share the closing corner
+  const n = Math.max(r.length - 1, 0); // edges r[i] → r[i+1]
+  // Each edge's bounding box, and the edges in order of their left end: edge j can only touch
+  // edge i if j starts (in x) no further right than i ends, and their y-ranges overlap.
+  // (Flat typed arrays: the pair loop is the hot path, and it stays monomorphic.)
+  const x0 = new Float64Array(n), x1 = new Float64Array(n), y0 = new Float64Array(n), y1 = new Float64Array(n);
+  for (let e = 0; e < n; e++) {
+    const [ax, ay] = r[e]!, [bx, by] = r[e + 1]!;
+    x0[e] = Math.min(ax, bx); x1[e] = Math.max(ax, bx);
+    y0[e] = Math.min(ay, by); y1[e] = Math.max(ay, by);
+  }
+  const order = Uint32Array.from({ length: n }, (_, e) => e).sort((a, b) => x0[a]! - x0[b]!);
+  for (let a = 0; a < n; a++) {
+    const i = order[a]!;
+    const ix1 = x1[i]!, iy0 = y0[i]!, iy1 = y1[i]!;
+    for (let b = a + 1; b < n; b++) {
+      const j = order[b]!;
+      if (x0[j]! > ix1) break; // every later edge starts further right still
+      if (y1[j]! < iy0 || y0[j]! > iy1) continue;
+      const lo = i < j ? i : j, hi = i < j ? j : i;
+      if (hi - lo < 2) continue; // neighbours share a corner
+      if (lo === 0 && hi === n - 1) continue; // first and last edge share the closing corner
       if (segmentsTouch(r[i]!, r[i + 1]!, r[j]!, r[j + 1]!)) return true;
     }
   }
@@ -106,19 +150,51 @@ export const lineGeometry = z.object({
 const ring = z
   .array(position)
   .min(4, 'a polygon ring needs at least 4 positions (3 corners + the closing point)')
-  .refine((r) => samePos(r[0]!, r[r.length - 1]!), { message: 'a polygon ring must be closed (first point = last point)' })
-  .refine((r) => distinctCount(r) >= 3, { message: 'a polygon needs at least 3 different corners' })
-  .refine((r) => !ringSelfIntersects(r), { message: 'a polygon outline must not cross itself' });
+  // `r.length === 0`: an empty ring has already failed min(4), and zod still runs refines on
+  // it; r[0] would be undefined and the request a 500 instead of a 400.
+  .refine((r) => r.length === 0 || samePos(r[0]!, r[r.length - 1]!), {
+    message: 'a polygon ring must be closed (first point = last point)',
+  })
+  .refine((r) => distinctCount(r) >= 3, { message: 'a polygon needs at least 3 different corners' });
+
+const tooManyPositions = `a polygon can have at most ${MAX_POLYGON_POSITIONS.toLocaleString('en-US')} positions`;
+const tooManyRings = `a polygon can have at most ${MAX_POLYGON_RINGS} rings`;
 
 export const polygonGeometry = z.object({
   type: z.literal('Polygon'),
   coordinates: z
-    .array(ring)
-    .min(1, 'a polygon needs an outer ring')
-    // A crossing ring already has its reason; its area says nothing more.
-    .refine((rings) => !rings[0] || ringSelfIntersects(rings[0]) || ringArea(rings[0]) > 1e-12, {
-      message: 'a polygon must enclose an area (its corners are in a line)',
-    }),
+    // PT44 review — ring count first, O(1) on the raw value. A refusal here is "dirty", so the
+    // pipe below never parses a single ring. (Not an array: the pipe's z.array says so.)
+    .unknown()
+    .superRefine((v, ctx) => {
+      if (Array.isArray(v) && v.length > MAX_POLYGON_RINGS) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: tooManyRings });
+      }
+    })
+    .pipe(
+      // PT45 — then size, on the raw arrays: a refusal here is "dirty" too, and the pipe does
+      // not run the per-position parse or the edge check on it at all.
+      z
+        .array(z.array(z.unknown()))
+        .min(1, 'a polygon needs an outer ring')
+        .refine((rings) => rings.reduce((sum, r) => sum + r.length, 0) <= MAX_POLYGON_POSITIONS, {
+          message: tooManyPositions,
+        })
+        .pipe(
+          z.array(ring).superRefine((rings, ctx) => {
+            rings.forEach((r, i) => {
+              if (r.length < 4) return; // already refused; nothing here can cross
+              // PT45 — once per ring (this used to run in the ring refine and again for the area).
+              if (ringSelfIntersects(r)) {
+                ctx.addIssue({ code: z.ZodIssueCode.custom, path: [i], message: 'a polygon outline must not cross itself' });
+              } else if (i === 0 && ringArea(r) <= 1e-12) {
+                // A crossing ring already has its reason; its area says nothing more.
+                ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'a polygon must enclose an area (its corners are in a line)' });
+              }
+            });
+          }),
+        ),
+    ),
 });
 
 /** One-line, user-facing summary of a geometry/properties validation failure. */

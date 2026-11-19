@@ -5,10 +5,12 @@
  *   DATABASE_URL=… PHOTO_BACKEND=… npx tsx scripts/sweep-photos.ts --apply    # remove them
  *
  * Uses the same env as the API (DATABASE_URL; PHOTO_BACKEND and its storage vars), so it looks
- * at exactly the store the deployment writes to. See src/lib/photoSweep.ts for the two guards:
- * a one-day age floor, and a refusal to apply against an empty `photos` table.
+ * at exactly the store the deployment writes to. See src/lib/photoSweep.ts for the guards:
+ * a one-day age floor (an unknown age counts as new), and refusals to apply against an empty
+ * `photos` table, a store that shares no key with the table (wrong backend or database), or a
+ * store more than half unclaimed (PT44). A dry run prints the refusal --apply would hit.
  *
- * Options: --apply · --allow-empty-table · --min-age-hours <n> (default 24)
+ * Options: --apply · --allow-empty-table · --allow-mostly-unclaimed · --min-age-hours <n> (default 24)
  */
 import { createPhotoStore } from '../src/storage/index.js';
 import { pool, query } from '../src/db.js';
@@ -34,13 +36,19 @@ try {
   const result = await sweepOrphanPhotos(
     store,
     rows.map((r) => r.path),
-    { apply: flag('--apply'), allowEmptyTable: flag('--allow-empty-table'), minAgeMs: minAgeHours * 3600_000 },
+    {
+      apply: flag('--apply'),
+      allowEmptyTable: flag('--allow-empty-table'),
+      allowMostlyUnclaimed: flag('--allow-mostly-unclaimed'),
+      minAgeMs: minAgeHours * 3600_000,
+    },
   );
   console.log(
     `${store.kind} store: ${result.stored} object(s), ${result.claimed} claimed by a row, ` +
       `${result.orphans.length} orphan(s) older than ${minAgeHours} h, ${result.tooNew} newer (left alone).`,
   );
   for (const key of result.orphans) console.log(`  orphan: ${key}`);
+  if (result.wouldRefuse) console.log(`--apply would be refused: ${result.wouldRefuse}`);
   console.log(result.applied ? `Removed ${result.removed}.` : 'Dry run: nothing removed. Add --apply to remove them.');
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import maplibregl from 'maplibre-gl';
 import MapboxDraw, { type DrawCustomMode } from '@mapbox/mapbox-gl-draw';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-csp-worker.js?url';
@@ -16,6 +17,7 @@ import { OfflineAreas } from './OfflineAreas';
 import { toSource } from '../lib/geo';
 import { CLUSTER_OPTIONS, IS_CLUSTER, NOT_CLUSTER } from '../lib/clusters';
 import { useAppStore } from '../lib/store';
+import { PHONE_QUERY } from '../hooks/useIsPhone';
 import { formatArea, formatLength } from '../lib/units';
 import turfLength from '@turf/length';
 import turfArea from '@turf/area';
@@ -37,6 +39,25 @@ interface MapViewProps {
 maplibregl.workerUrl = maplibreWorkerUrl;
 
 const EMPTY = { type: 'FeatureCollection' as const, features: [] };
+
+/**
+ * PT34 — an empty MapLibre control that React renders into through a portal, so
+ * our own buttons (circle, offline, compass) stack with MapLibre's and Draw's in
+ * the same corner instead of sitting at hardcoded pixel offsets beside them.
+ */
+class PortalControl implements maplibregl.IControl {
+  readonly el: HTMLDivElement;
+  constructor(className: string) {
+    this.el = document.createElement('div');
+    this.el.className = className;
+  }
+  onAdd() {
+    return this.el;
+  }
+  onRemove() {
+    this.el.remove();
+  }
+}
 
 /** PT29 — true for a row drawn from the offline queue, not yet on the server. */
 const PENDING: maplibregl.ExpressionSpecification = ['==', ['get', '_pending'], true];
@@ -69,6 +90,8 @@ export function MapView({
   const [measure, setMeasure] = useState<string | null>(null);
   // Offline tile-download panel (PT11).
   const [offlineOpen, setOfflineOpen] = useState(false);
+  // PT34 — the control containers our own buttons portal into (set once the controls are added).
+  const [slots, setSlots] = useState<{ tools: HTMLElement; compass: HTMLElement } | null>(null);
   // Mirror drawingShape into a ref so the (init-once) draw.render handler can
   // tell a circle from a polygon without re-binding.
   const drawingShapeRef = useRef<'line' | 'polygon' | 'circle' | null>(null);
@@ -348,6 +371,13 @@ export function MapView({
 
       // MapboxDraw targets mapbox-gl typings; MapLibre is API-compatible.
       map.addControl(draw as unknown as maplibregl.IControl, 'top-left');
+      // PT34 — circle + offline join the top-left stack under Draw; the compass
+      // joins the top-right stack under zoom/geolocate.
+      const tools = new PortalControl('maplibregl-ctrl maplibregl-ctrl-group');
+      const compass = new PortalControl('maplibregl-ctrl pt-compass-ctrl');
+      map.addControl(tools, 'top-left');
+      map.addControl(compass, 'top-right');
+      setSlots({ tools: tools.el, compass: compass.el });
       map.on('draw.create', (e: { features: GeoJsonFeature[] }) => {
         const f = e.features[0];
         if (!f) return;
@@ -412,6 +442,11 @@ export function MapView({
       map.on('rotate', onRotate);
       map.on('rotateend', onRotate);
 
+      // PT34 — on a phone the open attribution strip sits under the List/Layers
+      // buttons; start it folded behind its (i) toggle, one tap away.
+      if (window.matchMedia?.(PHONE_QUERY).matches) {
+        map.getContainer().querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
+      }
       setReady(true);
       cbRef.current.onReady?.(map);
     });
@@ -549,20 +584,24 @@ export function MapView({
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
-      <button
-        onClick={startCircle}
-        title="Draw circle"
-        className="absolute left-3 top-[150px] z-20 h-[29px] w-[29px] rounded bg-white text-base leading-none text-slate-800 shadow"
-      >
-        ◯
-      </button>
-      <button
-        onClick={() => setOfflineOpen((v) => !v)}
-        title="Download this area for offline use"
-        className="absolute left-3 top-[185px] z-20 h-[29px] w-[29px] rounded bg-white text-base leading-none text-slate-800 shadow"
-      >
-        ⬇
-      </button>
+      {slots &&
+        createPortal(
+          <>
+            <button type="button" onClick={startCircle} title="Draw circle" aria-label="Draw circle" className="text-base leading-none text-slate-800">
+              ◯
+            </button>
+            <button
+              type="button"
+              onClick={() => setOfflineOpen((v) => !v)}
+              title="Download this area for offline use"
+              aria-label="Download this area for offline use"
+              className="text-base leading-none text-slate-800"
+            >
+              ⬇
+            </button>
+          </>,
+          slots.tools,
+        )}
       {offlineOpen && (
         <OfflineAreas
           map={mapRef.current}
@@ -570,29 +609,35 @@ export function MapView({
           onClose={() => setOfflineOpen(false)}
         />
       )}
-      <button
-        onClick={resetNorth}
-        title="Reset to north (click)"
-        className="absolute right-3 top-[180px] z-20 flex h-14 w-14 items-center justify-center rounded-full border-2 border-slate-300 bg-white shadow-lg"
-        style={{ transform: `rotate(${-bearing}deg)` }}
-      >
-        <svg viewBox="0 0 56 56" className="h-full w-full">
-          <polygon points="28,8 33,28 28,24 23,28" fill="#dc2626" />
-          <polygon points="28,48 33,28 28,32 23,28" fill="#475569" />
-          <text
-            x="28"
-            y="6"
-            textAnchor="middle"
-            fontSize="8"
-            fontWeight="bold"
-            fill="#dc2626"
+      {slots &&
+        createPortal(
+          <button
+            type="button"
+            onClick={resetNorth}
+            title="Reset to north (click)"
+            aria-label="Reset to north"
+            className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-slate-300 bg-white shadow-lg"
+            style={{ transform: `rotate(${-bearing}deg)` }}
           >
-            N
-          </text>
-        </svg>
-      </button>
+            <svg viewBox="0 0 56 56" className="h-full w-full">
+              <polygon points="28,8 33,28 28,24 23,28" fill="#dc2626" />
+              <polygon points="28,48 33,28 28,32 23,28" fill="#475569" />
+              <text
+                x="28"
+                y="6"
+                textAnchor="middle"
+                fontSize="8"
+                fontWeight="bold"
+                fill="#dc2626"
+              >
+                N
+              </text>
+            </svg>
+          </button>,
+          slots.compass,
+        )}
       {drawingShape && (
-        <div className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-slate-900/95 px-4 py-2 text-sm text-slate-100 shadow-xl">
+        <div className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-slate-900/95 px-4 py-2 text-sm text-slate-100 shadow-xl max-md:bottom-16 max-md:w-[calc(100%-1.5rem)] max-md:flex-wrap max-md:gap-2 max-md:px-3">
           <span>{hint}</span>
           {measure && (
             <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-brand">
@@ -601,13 +646,13 @@ export function MapView({
           )}
           <button
             onClick={finishDrawing}
-            className="rounded-md bg-brand px-3 py-1 font-medium text-white"
+            className="rounded-md bg-brand px-3 py-1 font-medium text-white max-md:min-h-[44px] max-md:px-4"
           >
             Finish
           </button>
           <button
             onClick={cancelDrawing}
-            className="rounded-md bg-slate-700 px-3 py-1"
+            className="rounded-md bg-slate-700 px-3 py-1 max-md:min-h-[44px] max-md:px-4"
           >
             Cancel
           </button>

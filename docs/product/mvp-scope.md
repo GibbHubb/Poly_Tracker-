@@ -18,6 +18,15 @@ handed to someone else as a map they can follow.
 - Export an A3 PDF of the current map view with a feature list.
 - Import and export the farm as GeoJSON.
 
+## Supported viewports (PT34)
+
+- **Floor: 320 CSS px wide.** No screen scrolls sideways at 320 px (farm list, map, settings).
+- One breakpoint, Tailwind's `md` (768 px). Below it is the phone layout: the map fills the width,
+  the feature list is a bottom sheet behind a **List** button, Layers folds behind one button, and
+  the map toolbar's actions sit behind a **⋯** menu. Every map-screen control is at least 44×44 px.
+- At 768 px and up the map and the feature list sit side by side.
+- Page zoom is allowed (the viewport meta no longer sets `user-scalable=no`).
+
 ## Out of scope (explicit non-goals)
 
 - **User accounts, sharing and per-farm permissions.** The MVP is protected by a deployment-wide

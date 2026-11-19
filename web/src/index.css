@@ -13,7 +13,38 @@ body,
   font: inherit;
 }
 
-/* Push the zoom controls below the top-right toolbar (top-3 = 12px + h-9 = 36px + 8px gap) */
-.maplibregl-ctrl-top-right {
-  margin-top: 56px;
+/* PT34 — both top control corners start below the map toolbar, whose height is
+   measured (FarmMap sets --pt-toolbar-h) rather than assumed, so a toolbar that
+   wraps onto two rows still clears the controls. The 10px is MapLibre's own
+   control margin. */
+.pt-map .maplibregl-ctrl-top-right,
+.pt-map .maplibregl-ctrl-top-left {
+  margin-top: calc(var(--pt-toolbar-h, 56px) - 10px);
+}
+
+/* PT34 — phones: every map control is a 44x44 touch target (MapLibre's are 29px,
+   its attribution toggle 24px). Scoped under .pt-map so it outranks maplibre-gl.css,
+   which loads after this file. */
+@media (max-width: 767px) {
+  .pt-map .maplibregl-ctrl-group button {
+    width: 44px;
+    height: 44px;
+  }
+  .pt-map .maplibregl-ctrl-attrib.maplibregl-compact {
+    min-height: 44px;
+    padding-right: 44px;
+    border-radius: 22px;
+  }
+  .pt-map .maplibregl-ctrl-attrib.maplibregl-compact.maplibregl-compact-show {
+    padding-right: 48px;
+  }
+  .pt-map .maplibregl-ctrl-attrib.maplibregl-compact .maplibregl-ctrl-attrib-button {
+    width: 44px;
+    height: 44px;
+    background-repeat: no-repeat;
+    background-position: center;
+  }
+  .pt-map .maplibregl-ctrl-attrib-inner {
+    line-height: 40px;
+  }
 }

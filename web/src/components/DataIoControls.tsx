@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api, type GeoJsonFeatureCollection, type ImportGeojsonReport } from '../lib/api';
 import { mergeFarmGeoJson, pointsToCsv, downloadBlob } from '../lib/exportData';
 import { parseImport, buildImportPlan, type ImportPlan } from '../lib/importData';
@@ -95,7 +96,7 @@ export function DataIoControls({
   };
 
   const btnClass =
-    'rounded-md bg-slate-900/90 px-3 py-1 text-sm text-slate-200 shadow-lg hover:bg-slate-700/90';
+    'rounded-md bg-slate-900/90 px-3 py-1 text-sm text-slate-200 shadow-lg hover:bg-slate-700/90 max-md:min-h-[44px] max-md:text-left';
 
   return (
     <>
@@ -117,7 +118,7 @@ export function DataIoControls({
       />
 
       <label
-        className="flex items-center gap-1 rounded-md bg-slate-900/90 px-2 py-1 text-xs text-slate-300 shadow-lg"
+        className="flex items-center gap-1 rounded-md bg-slate-900/90 px-2 py-1 text-xs text-slate-300 shadow-lg max-md:min-h-[44px] max-md:gap-2 max-md:px-3 max-md:text-sm"
         title="Commit every valid feature even if some fail (otherwise the whole batch rolls back on the first error)"
       >
         <input
@@ -143,9 +144,11 @@ export function DataIoControls({
         onChange={handleServerFileChange}
       />
 
-      {serverReport && (
+      {/* PT34 — the two dialogs portal to <body>: on a phone these controls live in a
+          menu that hides itself after a tap, and a hidden parent would hide them too. */}
+      {serverReport && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="max-h-[80vh] w-96 overflow-y-auto rounded-xl bg-slate-900 p-6 text-slate-200 shadow-2xl">
+          <div className="max-h-[80vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl bg-slate-900 p-6 text-slate-200 shadow-2xl">
             <h2 className="mb-1 text-lg font-semibold">Server import report</h2>
             <p className="mb-4 text-xs text-slate-500">
               Mode: {serverReport.mode} ·{' '}
@@ -182,12 +185,13 @@ export function DataIoControls({
               Close
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
-      {plan && (
+      {plan && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="w-80 rounded-xl bg-slate-900 p-6 text-slate-200 shadow-2xl">
+          <div className="w-80 max-w-[calc(100vw-2rem)] rounded-xl bg-slate-900 p-6 text-slate-200 shadow-2xl">
             <h2 className="mb-4 text-lg font-semibold">Import preview</h2>
             <p className="mb-1 text-sm text-slate-400">Geometry type routing:</p>
             <ul className="mb-4 space-y-1 text-sm">
@@ -219,7 +223,8 @@ export function DataIoControls({
             </div>
             {importError && <p className="mt-2 text-xs text-red-400">{importError}</p>}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

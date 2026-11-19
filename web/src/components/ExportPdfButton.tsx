@@ -25,7 +25,7 @@ export function ExportPdfButton({ onExport }: Props) {
     <button
       onClick={run}
       disabled={busy}
-      className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+      className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50 max-md:min-h-[44px]"
     >
       {busy ? 'Exporting…' : 'Export PDF'}
     </button>

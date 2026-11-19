@@ -259,7 +259,7 @@ export function PhotoUpload({ featureType, featureId, onUploaded }: Props) {
         </p>
       )}
       <label className="block cursor-pointer">
-        <span className="rounded-md bg-slate-700 px-3 py-2 text-white">
+        <span className="rounded-md bg-slate-700 px-3 py-2 text-white max-md:inline-flex max-md:min-h-[44px] max-md:items-center">
           Add photo
         </span>
         <input

@@ -1,10 +1,11 @@
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { GeoJsonFeature, GeoJsonFeatureCollection } from '../lib/api';
 import { FEATURE_COLORS, PALETTE } from '../lib/mapStyle';
 import { formatArea, formatLength } from '../lib/units';
 import { POINT_TYPES, type DrawKind, type PointType } from './FeatureDialog';
 import { isPendingFeature } from '../lib/pendingOverlay';
-import { ROW_PITCH, WINDOW_FROM, windowRange } from '../lib/windowRange';
+import { ROW_PITCH, ROW_PITCH_TOUCH, WINDOW_FROM, windowRange } from '../lib/windowRange';
+import { useIsPhone } from '../hooks/useIsPhone';
 
 export interface SidebarSelection {
   kind: DrawKind;
@@ -33,6 +34,14 @@ interface Props {
   polyRuns: GeoJsonFeatureCollection;
   features: GeoJsonFeatureCollection;
   onSelect: (sel: SidebarSelection) => void;
+  /**
+   * PT34 — below `md` the list is a bottom sheet over the map, shown only while
+   * `open`; at `md` and up it is the same side-by-side aside as before and these
+   * two props change nothing. `onClose` runs on the sheet's Close button and on
+   * Escape inside it; the caller returns focus to whatever opened it.
+   */
+  open?: boolean;
+  onClose?: () => void;
 }
 
 const DEFAULT_COLOR: Record<DrawKind, string> = {
@@ -90,12 +99,22 @@ export function FeatureSidebar({
   polyRuns,
   features,
   onSelect,
+  open = false,
+  onClose,
 }: Props) {
+  const phone = useIsPhone();
+  const pitch = phone ? ROW_PITCH_TOUCH : ROW_PITCH;
   const [search, setSearch] = useState('');
   const [activeTypes, setActiveTypes] = useState<Set<PointType>>(new Set());
   // PT32 — the scroll container the windowed lists measure against. State, not
   // a ref, so the lists re-render once it exists.
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
+
+  // PT34 review — on a phone, opening the sheet moves focus into it, so a keyboard or
+  // screen-reader user lands in the list they asked for (and Escape reaches it).
+  useEffect(() => {
+    if (phone && open) scrollEl?.focus({ preventScroll: true });
+  }, [phone, open, scrollEl]);
 
   const q = search.trim().toLowerCase();
 
@@ -140,7 +159,39 @@ export function FeatureSidebar({
     visiblePoints.length === 0;
 
   return (
-    <aside ref={setScrollEl} className="w-72 shrink-0 overflow-y-auto border-l border-slate-800 bg-slate-900 p-4 text-sm">
+    <aside
+      id="feature-list"
+      ref={setScrollEl}
+      data-testid="feature-list"
+      // PT34 review — on a phone the sheet is a NON-modal dialog: the map behind it stays
+      // usable (pan to a paddock, then pick it in the list), so there is no focus trap and no
+      // aria-modal="true", which would tell a screen reader the map is inert when it is not.
+      // At `md` and up it stays a plain aside (a complementary landmark) named "Features".
+      role={phone ? 'dialog' : undefined}
+      aria-modal={phone ? false : undefined}
+      aria-label="Features"
+      tabIndex={phone ? -1 : undefined}
+      onKeyDown={(e) => {
+        // Scoped to the sheet, not the document: Escape on the map belongs to the draw tool.
+        if (phone && open && e.key === 'Escape') {
+          e.stopPropagation();
+          onClose?.();
+        }
+      }}
+      className={`w-72 outline-none shrink-0 overflow-y-auto border-l border-slate-800 bg-slate-900 p-4 text-sm max-md:absolute max-md:inset-x-0 max-md:bottom-0 max-md:z-20 max-md:h-[55%] max-md:w-full max-md:touch-pan-y max-md:overscroll-contain max-md:rounded-t-2xl max-md:border-l-0 max-md:border-t max-md:pt-0 max-md:shadow-2xl ${open ? '' : 'max-md:hidden'}`}
+    >
+      <div className="sticky top-0 z-10 -mx-4 mb-2 flex items-center justify-between bg-slate-900 px-4 pt-2 md:hidden">
+        <span aria-hidden className="absolute left-1/2 top-1.5 h-1 w-10 -translate-x-1/2 rounded-full bg-slate-600" />
+        <h2 className="font-semibold text-slate-200">Features</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close feature list"
+          className="flex h-11 min-w-[44px] items-center justify-center rounded-md px-3 text-slate-300 hover:bg-slate-800"
+        >
+          Close
+        </button>
+      </div>
       <SearchBar value={search} onChange={setSearch} />
       <TypeChips active={activeTypes} onToggle={toggleType} />
 
@@ -149,7 +200,7 @@ export function FeatureSidebar({
       ) : (
         <>
           <Section title={`Paddocks (${visiblePaddocks.length})`}>
-            <WindowedRows items={visiblePaddocks} scrollEl={scrollEl} render={(f, style) => {
+            <WindowedRows items={visiblePaddocks} scrollEl={scrollEl} pitch={pitch} render={(f, style) => {
               const s = selectionOf('paddock', f);
               return (
                 <Row
@@ -166,7 +217,7 @@ export function FeatureSidebar({
           </Section>
 
           <Section title={`Poly runs (${visiblePolyRuns.length})`}>
-            <WindowedRows items={visiblePolyRuns} scrollEl={scrollEl} render={(f, style) => {
+            <WindowedRows items={visiblePolyRuns} scrollEl={scrollEl} pitch={pitch} render={(f, style) => {
               const s = selectionOf('polyRun', f);
               const meta = [
                 formatLength(s.length_m),
@@ -189,7 +240,7 @@ export function FeatureSidebar({
           </Section>
 
           <Section title={`Points (${visiblePoints.length})`}>
-            <WindowedRows items={visiblePoints} scrollEl={scrollEl} render={(f, style) => {
+            <WindowedRows items={visiblePoints} scrollEl={scrollEl} pitch={pitch} render={(f, style) => {
               const s = selectionOf('feature', f);
               return (
                 <Row
@@ -223,14 +274,14 @@ function SearchBar({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Search by name…"
-        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 pr-7 text-sm outline-none focus:border-brand"
+        className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 pr-7 text-sm outline-none focus:border-brand max-md:min-h-[44px] max-md:pr-11 max-md:text-base"
       />
       {value && (
         <button
           type="button"
           onClick={() => onChange('')}
           title="Clear search"
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 max-md:right-0 max-md:flex max-md:h-11 max-md:w-11 max-md:items-center max-md:justify-center"
         >
           ✕
         </button>
@@ -255,7 +306,7 @@ function TypeChips({
             key={t}
             type="button"
             onClick={() => onToggle(t)}
-            className={`rounded-full px-2 py-0.5 text-xs ${
+            className={`rounded-full px-2 py-0.5 text-xs max-md:min-h-[44px] max-md:px-3 max-md:text-sm ${
               on ? 'bg-brand text-white' : 'bg-slate-800 text-slate-300'
             }`}
           >
@@ -294,10 +345,13 @@ function Section({
 function WindowedRows({
   items,
   scrollEl,
+  pitch,
   render,
 }: {
   items: GeoJsonFeature[];
   scrollEl: HTMLElement | null;
+  /** PT34 — row pitch in use: ROW_PITCH, or ROW_PITCH_TOUCH on a phone. */
+  pitch: number;
   render: (f: GeoJsonFeature, style?: CSSProperties) => ReactNode;
 }) {
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -312,7 +366,7 @@ function WindowedRows({
     if (!windowed || !scrollEl || !list) return;
     // Distance from the top of the visible scroll area to the list's top.
     const top = list.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top;
-    const next = windowRange(top, scrollEl.clientHeight, count);
+    const next = windowRange(top, scrollEl.clientHeight, count, pitch);
     setRange((prev) => (prev[0] === next[0] && prev[1] === next[1] ? prev : next));
   };
   useLayoutEffect(() => {
@@ -335,9 +389,9 @@ function WindowedRows({
 
   const [a, b] = range;
   return (
-    <ul ref={listRef} className="relative" style={{ height: count * ROW_PITCH }}>
+    <ul ref={listRef} className="relative" style={{ height: count * pitch }}>
       {items.slice(a, b).map((f, k) =>
-        render(f, { position: 'absolute', left: 0, right: 0, top: (a + k) * ROW_PITCH, height: ROW_PITCH }),
+        render(f, { position: 'absolute', left: 0, right: 0, top: (a + k) * pitch, height: pitch }),
       )}
     </ul>
   );
@@ -367,7 +421,7 @@ function Row({
         disabled={pending}
         data-pending={pending ? 'true' : undefined}
         title={pending ? 'Saved on this device; waiting to sync. Editable once it has synced.' : undefined}
-        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-slate-800 disabled:cursor-default disabled:opacity-70 disabled:hover:bg-transparent"
+        className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-slate-800 max-md:min-h-[44px] disabled:cursor-default disabled:opacity-70 disabled:hover:bg-transparent"
       >
         {pending && <span aria-label="waiting to sync">⏳</span>}
         <span

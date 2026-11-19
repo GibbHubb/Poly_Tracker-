@@ -48,13 +48,13 @@ export default function App() {
         path="*"
         element={
           <div className="flex h-full flex-col bg-slate-900 text-slate-100">
-            <header className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-              <Link to="/" className="text-lg font-semibold text-brand">
+            <header className="flex items-center justify-between border-b border-slate-800 px-4 py-3 max-md:py-1">
+              <Link to="/" className="text-lg font-semibold text-brand max-md:flex max-md:min-h-[44px] max-md:items-center">
                 Poly Tracker
               </Link>
               <div className="flex items-center gap-3">
                 <StatusBadge />
-                <Link to="/settings" className="text-sm text-slate-300">
+                <Link to="/settings" className="text-sm text-slate-300 max-md:-mr-2 max-md:flex max-md:min-h-[44px] max-md:min-w-[44px] max-md:items-center max-md:px-2">
                   Settings
                 </Link>
               </div>

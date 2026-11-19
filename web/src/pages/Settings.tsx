@@ -236,7 +236,7 @@ export function Settings() {
             value={writeInput}
             onChange={(e) => setWriteInput(e.target.value)}
             placeholder="Write bearer token"
-            className="flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500"
+            className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500"
           />
           <button
             onClick={() => saveWrite(writeInput.trim())}
@@ -266,7 +266,7 @@ export function Settings() {
             value={readInput}
             onChange={(e) => setReadInput(e.target.value)}
             placeholder="Read bearer token (optional)"
-            className="flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500"
+            className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500"
           />
           <button
             onClick={() => saveRead(readInput.trim())}

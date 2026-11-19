@@ -66,7 +66,7 @@ export const POINT_TYPES: PointType[] = [
 ];
 
 const inputCls =
-  'mb-4 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:border-brand';
+  'mb-4 w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm outline-none focus:border-brand max-md:min-h-[44px] max-md:text-base';
 const labelCls = 'mb-1 block text-sm text-slate-300';
 
 export function FeatureDialog({
@@ -275,7 +275,7 @@ export function FeatureDialog({
                   onDelete();
                 }
               }}
-              className="mr-auto rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white"
+              className="mr-auto rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white max-md:min-h-[44px]"
             >
               Delete
             </button>
@@ -283,14 +283,14 @@ export function FeatureDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md bg-slate-700 px-4 py-2 text-sm"
+            className="rounded-md bg-slate-700 px-4 py-2 text-sm max-md:min-h-[44px]"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!name.trim()}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50 max-md:min-h-[44px]"
           >
             Save
           </button>

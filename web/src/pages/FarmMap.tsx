@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useParams } from 'react-router-dom';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import { MapView } from '../components/MapView';
@@ -30,6 +30,8 @@ import { geometryCoords } from '../lib/geo';
 import { withClustersOff } from '../lib/clusters';
 import { formatArea, formatLength } from '../lib/units';
 import { useFarmData } from '../hooks/useFarmData';
+import { useDismiss } from '../hooks/useDismiss';
+import { useIsPhone } from '../hooks/useIsPhone';
 import { forExport } from '../lib/pendingOverlay';
 import { geometryProblem, normaliseLongitudes } from '../lib/geometryCheck';
 import { describeError, isNetworkError, notify, reportError, shouldQueue } from '../lib/notify';
@@ -92,6 +94,46 @@ export function FarmMap() {
   const [editing, setEditing] = useState<SidebarSelection | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  // PT34 — phone layout (below `md`): the feature list is a bottom sheet, closed
+  // on every map open so the map is what you see first; the toolbar actions sit
+  // behind a "more" menu. Neither state affects the desktop layout.
+  const [listOpen, setListOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  // PT34 review — both are phone-only states: crossing the `md` breakpoint (a rotation, a
+  // resized window) starts each layout with them closed, so neither reappears on its own later.
+  const isPhone = useIsPhone();
+  useEffect(() => {
+    setListOpen(false);
+    setMoreOpen(false);
+  }, [isPhone]);
+  // PT34 review — the ⋯ menu closes on Escape (focus back on ⋯) and on a press outside it.
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null);
+  const moreWrapRef = useRef<HTMLDivElement | null>(null);
+  useDismiss(moreOpen, moreWrapRef, (reason) => {
+    setMoreOpen(false);
+    if (reason === 'escape') moreButtonRef.current?.focus();
+  });
+  // PT34 review — closing the sheet by Escape or its Close button hands focus back to List.
+  // (Picking a row closes it too, but focus then belongs to the edit dialog that opens.)
+  const listButtonRef = useRef<HTMLButtonElement | null>(null);
+  const closeList = useCallback(() => {
+    setListOpen(false);
+    listButtonRef.current?.focus();
+  }, []);
+  // PT34 — the toolbar's measured bottom edge, so the map's control corners start
+  // below it however many rows it wraps onto (index.css reads --pt-toolbar-h).
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const [toolbarBottom, setToolbarBottom] = useState(56);
+  useLayoutEffect(() => {
+    const el = toolbarRef.current;
+    if (!el) return;
+    const measure = () => setToolbarBottom(Math.ceil(el.offsetTop + el.offsetHeight + 8));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [online, setOnline] = useState(navigator.onLine);
   useEffect(() => {
     const up = () => setOnline(true);
@@ -290,6 +332,8 @@ export function FarmMap() {
       }
     }
     setEditing(sel);
+    // PT34 — on a phone the sheet would cover the edit dialog and the feature.
+    setListOpen(false);
   }, []);
 
   // Edit dialog confirmed: PATCH name/colour (+ type for points), with the
@@ -459,8 +503,11 @@ export function FarmMap() {
   );
 
   return (
-    <div className="flex h-full">
-      <div className="relative min-w-0 flex-1">
+    <div className="relative flex h-full">
+      <div
+        className="pt-map relative min-w-0 flex-1"
+        style={{ '--pt-toolbar-h': `${toolbarBottom}px` } as CSSProperties}
+      >
         <MapView
           paddocks={paddocks}
           polyRuns={polyRuns}
@@ -479,7 +526,7 @@ export function FarmMap() {
             className="absolute bottom-12 left-1/2 z-10 flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center gap-3 rounded-lg border border-red-500/70 bg-slate-900 px-3 py-2 text-xs text-slate-100 shadow-lg"
           >
             <p className="flex-1">{data.refreshError}</p>
-            <button onClick={retryLoad} className="min-h-[32px] shrink-0 rounded-md bg-brand px-3 py-1 text-xs text-white">
+            <button onClick={retryLoad} className="min-h-[32px] shrink-0 rounded-md bg-brand px-3 py-1 text-xs text-white max-md:min-h-[44px]">
               Retry
             </button>
           </div>
@@ -508,7 +555,7 @@ export function FarmMap() {
             <p className="flex-1">{loadError}</p>
             <button
               onClick={retryLoad}
-              className="min-h-[32px] shrink-0 rounded-md bg-brand px-3 py-1 text-xs text-white"
+              className="min-h-[32px] shrink-0 rounded-md bg-brand px-3 py-1 text-xs text-white max-md:min-h-[44px]"
             >
               Retry
             </button>
@@ -551,65 +598,111 @@ export function FarmMap() {
           onSubmit={handleEditSubmit}
           onDelete={handleEditDelete}
         />
-        <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-start gap-2">
-          {searchOpen ? (
-            <>
-              <PlaceSearch
-                onSelect={(hit) => {
-                  const map = mapRef.current;
-                  if (map) {
-                    if (hit.bbox) {
-                      map.fitBounds(hit.bbox, { padding: 60, maxZoom: 16 });
-                    } else {
-                      map.flyTo({ center: hit.center, zoom: 15 });
+        {/* PT34 — one toolbar row that wraps: search on the left, farm + actions on
+            the right. It no longer overlaps (search used to sit centred under the
+            actions at 1280 px). Its empty space passes map gestures through. */}
+        <div
+          ref={toolbarRef}
+          data-testid="map-toolbar"
+          className="pointer-events-none absolute inset-x-3 top-3 z-10 flex flex-wrap items-start gap-2"
+        >
+          <div className="pointer-events-auto flex min-w-0 items-start gap-2">
+            {searchOpen ? (
+              <>
+                <PlaceSearch
+                  onSelect={(hit) => {
+                    const map = mapRef.current;
+                    if (map) {
+                      if (hit.bbox) {
+                        map.fitBounds(hit.bbox, { padding: 60, maxZoom: 16 });
+                      } else {
+                        map.flyTo({ center: hit.center, zoom: 15 });
+                      }
                     }
-                  }
-                  setSearchOpen(false);
-                }}
-              />
+                    setSearchOpen(false);
+                  }}
+                />
+                <button
+                  onClick={() => setSearchOpen(false)}
+                  title="Close search"
+                  aria-label="Close search"
+                  className="h-9 w-9 shrink-0 rounded-md bg-slate-900/90 text-slate-200 shadow-lg max-md:h-11 max-md:w-11"
+                >
+                  ✕
+                </button>
+              </>
+            ) : (
               <button
-                onClick={() => setSearchOpen(false)}
-                title="Close search"
-                className="h-9 w-9 rounded-md bg-slate-900/90 text-slate-200 shadow-lg"
+                onClick={() => setSearchOpen(true)}
+                title="Search address or place"
+                aria-label="Search address or place"
+                className="flex h-9 items-center gap-2 rounded-md bg-slate-900/90 px-3 text-sm text-slate-200 shadow-lg max-md:h-11 max-md:min-w-[44px] max-md:justify-center"
               >
-                ✕
+                <span aria-hidden>🔍</span>
+                <span className="hidden sm:inline">Search</span>
               </button>
-            </>
-          ) : (
+            )}
+            <span className="max-w-[16rem] self-center truncate rounded bg-slate-900/80 px-3 py-1 text-sm max-md:max-w-[40vw]">
+              {farm?.name ?? 'Loading…'}
+            </span>
+          </div>
+          <div ref={moreWrapRef} className="pointer-events-auto relative ml-auto flex min-w-0 items-start justify-end gap-2">
             <button
-              onClick={() => setSearchOpen(true)}
-              title="Search address or place"
-              className="flex h-9 items-center gap-2 rounded-md bg-slate-900/90 px-3 text-sm text-slate-200 shadow-lg"
+              ref={moreButtonRef}
+              type="button"
+              onClick={() => setMoreOpen((v) => !v)}
+              aria-expanded={moreOpen}
+              aria-controls="map-actions"
+              title="More actions"
+              aria-label="More actions"
+              data-testid="more-actions"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-slate-900/90 text-lg text-slate-200 shadow-lg md:hidden"
             >
-              <span aria-hidden>🔍</span>
-              <span className="hidden sm:inline">Search</span>
+              ⋯
             </button>
-          )}
+            {/* Hidden, not unmounted, while the phone menu is closed: DataIoControls
+                holds file inputs and import state that must outlive the menu. */}
+            <div
+              id="map-actions"
+              data-testid="map-actions"
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('button')) setMoreOpen(false);
+              }}
+              className={`flex flex-wrap items-center justify-end gap-2 max-md:absolute max-md:right-0 max-md:top-full max-md:mt-2 max-md:w-56 max-md:flex-col max-md:flex-nowrap max-md:items-stretch max-md:rounded-lg max-md:bg-slate-900/95 max-md:p-2 max-md:shadow-xl ${moreOpen ? '' : 'max-md:hidden'}`}
+            >
+              <button
+                onClick={() => setGalleryOpen(true)}
+                title="Photo gallery"
+                className="rounded-md bg-slate-900/90 px-3 py-1 text-sm text-slate-200 shadow-lg max-md:min-h-[44px] max-md:text-left"
+              >
+                🖼 Gallery
+              </button>
+              <DataIoControls
+                farmId={farmId}
+                farmName={farm?.name ?? 'farm'}
+                paddocks={exportCollections.paddocks}
+                polyRuns={exportCollections.polyRuns}
+                features={exportCollections.features}
+                onImport={handleImport}
+                onServerImportComplete={() => void refreshAfterWrite()}
+              />
+              <ExportPdfButton onExport={handleExport} />
+            </div>
+          </div>
         </div>
-        <div className="absolute left-3 bottom-3 z-10">
+        <div className="absolute bottom-3 left-3 z-10 flex items-end gap-2">
           <LayerToggle />
-        </div>
-        <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
-          <span className="rounded bg-slate-900/80 px-3 py-1 text-sm">
-            {farm?.name ?? 'Loading…'}
-          </span>
           <button
-            onClick={() => setGalleryOpen(true)}
-            title="Photo gallery"
-            className="rounded-md bg-slate-900/90 px-3 py-1 text-sm text-slate-200 shadow-lg"
+            ref={listButtonRef}
+            type="button"
+            onClick={() => setListOpen(true)}
+            aria-expanded={listOpen}
+            aria-controls="feature-list"
+            data-testid="open-feature-list"
+            className="flex h-11 items-center gap-2 rounded-md bg-slate-800/90 px-3 text-sm text-slate-200 shadow-lg md:hidden"
           >
-            🖼 Gallery
+            <span aria-hidden>☰</span> List ({paddocks.features.length + polyRuns.features.length + features.features.length})
           </button>
-          <DataIoControls
-            farmId={farmId}
-            farmName={farm?.name ?? 'farm'}
-            paddocks={exportCollections.paddocks}
-            polyRuns={exportCollections.polyRuns}
-            features={exportCollections.features}
-            onImport={handleImport}
-            onServerImportComplete={() => void refreshAfterWrite()}
-          />
-          <ExportPdfButton onExport={handleExport} />
         </div>
         {galleryOpen && (
           <PhotoGallery
@@ -624,6 +717,8 @@ export function FarmMap() {
         polyRuns={polyRuns}
         features={features}
         onSelect={handleSelect}
+        open={listOpen}
+        onClose={closeList}
       />
     </div>
   );

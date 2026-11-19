@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OVERSCAN, ROW_PITCH, windowRange } from './windowRange';
+import { OVERSCAN, ROW_PITCH, ROW_PITCH_TOUCH, windowRange } from './windowRange';
 
 // PT32 — the windowed sidebar mounts only what can be seen (plus overscan).
 describe('windowRange', () => {
@@ -25,5 +25,12 @@ describe('windowRange', () => {
   it('clamps to the end of the list at the bottom', () => {
     const [, b] = windowRange(-(4990 * ROW_PITCH), vh, 5000);
     expect(b).toBe(5000);
+  });
+  it('PT34: uses the taller phone pitch when given one', () => {
+    const scrolled = 100 * ROW_PITCH_TOUCH;
+    expect(windowRange(-scrolled, vh, 5000, ROW_PITCH_TOUCH)).toEqual([
+      100 - OVERSCAN,
+      100 + Math.ceil(vh / ROW_PITCH_TOUCH) + OVERSCAN,
+    ]);
   });
 });

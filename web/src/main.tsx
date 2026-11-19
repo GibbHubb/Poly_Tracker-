@@ -2,11 +2,15 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
+import { useSession } from './lib/session';
 import './index.css';
 // PT32 — the MapLibre + Draw stylesheets moved to MapView.tsx, so they ship
 // with the map chunk instead of blocking the first paint of every screen.
 
 registerSW({ immediate: true });
+// PT33 — learn whether per-user sign-in is on, and finish a magic-link sign-in
+// if this page load is the link's landing.
+void useSession.getState().load();
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root not found');

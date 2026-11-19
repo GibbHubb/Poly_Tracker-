@@ -109,6 +109,21 @@ branch-scoped environment variable so only that branch is affected.
 
 ## Notes & gotchas
 
+- **Per-user sign-in (PT33) is OFF until `AUTH_USERS=on`.** To switch it on: apply
+  `db/migrations/005_farm_members.sql` (`npm run db:init` with `POLY_TRACKER_MIGRATION_URL`), run
+  `node api/scripts/backfill-farm-members.mjs` (dry run) and then `--apply --owner <uuid> --expect <n>`,
+  and set `AUTH_USERS=on`, `AUTH_SESSION_SECRET` (32+ random chars), `SUPABASE_URL`,
+  `SUPABASE_PUBLISHABLE_KEY` and `AUTH_FARM_CREATORS` on the Vercel project.
+  `SUPABASE_URL` is required in users mode: without it the API refuses to start, because every
+  token's `iss` is checked against it. `AUTH_FARM_CREATORS` is a comma list of auth user ids and/or
+  emails allowed to create farms; anyone in the shared Supabase project (Our_Menu and Cortana users
+  too) can sign in, so this is what stops them making farms. Unset = nobody can create a farm
+  (403, fail closed; the log line names the variable). Your own id is on the Settings page once
+  signed in. People added to an existing farm by its owner do not need to be on the list. Add `https://<this deployment>/settings` to the
+  Supabase project's Auth redirect allow-list, or the magic link will land on the project's Site URL
+  (Our_Menu). The session cookie is `SameSite=Lax` and relies on the SPA and API sharing one origin
+  (PT21): splitting them onto two origins breaks sign-in, so do not set `VITE_API_BASE`.
+
 - **`/api/health` queries the database.** It used to return a hardcoded
   `{ok:true}`, which is exactly why a deleted database read as healthy for days.
   It now runs `SELECT 1` and returns **503** `{"ok":false,"db":"down"}` when the

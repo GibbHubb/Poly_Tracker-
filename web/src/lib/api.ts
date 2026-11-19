@@ -11,6 +11,14 @@ export interface Farm {
   created_at: string;
 }
 
+export type MemberRole = 'owner' | 'editor' | 'viewer';
+
+export interface FarmMember {
+  user_id: string;
+  role: MemberRole;
+  created_at: string;
+}
+
 export type GeometryType = 'Point' | 'LineString' | 'Polygon';
 
 export interface GeoJsonGeometry {
@@ -230,6 +238,15 @@ export const api = {
     request<void>(`/photos/${id}`, { method: 'DELETE' }),
   /** Absolute URL the api serves the stored image bytes from. */
   photoFileUrl: (id: string) => `${BASE}/photos/file/${id}`,
+  // PT33 — farm membership (users mode only; the API 404s these otherwise).
+  listMembers: (farmId: string) => request<FarmMember[]>(`/farms/${farmId}/members`),
+  addMember: (farmId: string, userId: string, role: MemberRole) =>
+    request<FarmMember>(`/farms/${farmId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId, role }),
+    }),
+  removeMember: (farmId: string, userId: string) =>
+    request<void>(`/farms/${farmId}/members/${userId}`, { method: 'DELETE' }),
 
   /**
    * Server-side bulk import (PT19): POST the raw GeoJSON file to

@@ -6,6 +6,7 @@ import { startAutoSync } from './lib/sync';
 import { ConflictToast } from './components/ConflictToast';
 import { Toaster } from './components/Toaster';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { useSession } from './lib/session';
 
 // PT32 — the map screen (MapLibre, mapbox-gl-draw, turf, exifr) and the
 // settings screen are split out of the entry chunk, so `/` paints from the
@@ -37,6 +38,20 @@ function StatusBadge() {
   );
 }
 
+/** PT33 — users mode with no session: say so instead of a bare 401 on every screen. */
+function SignInBanner() {
+  const { config, me, error, loaded } = useSession();
+  if (!loaded || !config?.users_mode || (me && !error)) return null;
+  return (
+    <div className="border-b border-amber-700 bg-amber-900/40 px-4 py-2 text-sm text-amber-200" role="status">
+      {error ? `Sign-in failed: ${error} ` : 'You are not signed in. '}
+      <Link to="/settings" className="underline">
+        Sign in
+      </Link>
+    </div>
+  );
+}
+
 export default function App() {
   useEffect(() => startAutoSync(), []);
   // PT35 — keyed on the path so leaving a broken screen clears the boundary.
@@ -59,6 +74,7 @@ export default function App() {
                 </Link>
               </div>
             </header>
+            <SignInBanner />
             <main className="min-h-0 flex-1">
               <ErrorBoundary key={pathname}>
                 <Suspense fallback={<RouteFallback />}>

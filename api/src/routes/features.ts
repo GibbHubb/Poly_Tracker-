@@ -150,7 +150,7 @@ featuresRouter.patch(
     );
     if (rows.length === 0) {
       if (expected !== null) {
-        await throwUpdateConflict('features', req.params.featureId, expected, 'Feature not found');
+        await throwUpdateConflict('features', req.params.featureId, expected, 'Feature not found', req.params.farmId);
       }
       throw new HttpError(404, 'Feature not found');
     }

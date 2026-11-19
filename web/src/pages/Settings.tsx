@@ -4,6 +4,7 @@ import { db, pendingCount, queueMutation, type ConflictRecord, type QueuedPhoto 
 import { replayQueue } from '../lib/sync';
 import { replayPhotoQueue } from '../lib/photoQueue';
 import { useAuthStore } from '../lib/auth';
+import { AccountPanel } from '../components/AccountPanel';
 import { api, type GeoJsonFeature } from '../lib/api';
 import {
   deriveRecordUrl,
@@ -206,6 +207,9 @@ export function Settings() {
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4">
       <h1 className="text-xl font-semibold">Settings</h1>
+
+      {/* PT33 — per-person sign-in; renders nothing unless the API has AUTH_USERS=on. */}
+      <AccountPanel />
 
       <section className="rounded-lg border border-slate-800 p-4">
         <h2 className="mb-3 font-medium">API access</h2>

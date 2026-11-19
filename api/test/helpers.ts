@@ -11,7 +11,7 @@ function pool(): pg.Pool {
 
 export async function truncateAll(): Promise<void> {
   await pool().query(
-    'TRUNCATE TABLE farms, paddocks, poly_runs, features, photos RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE farms, farm_members, paddocks, poly_runs, features, photos RESTART IDENTITY CASCADE',
   );
 }
 

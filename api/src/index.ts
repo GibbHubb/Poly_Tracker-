@@ -7,15 +7,34 @@ import { polyRunsRouter } from './routes/polyRuns.js';
 import { featuresRouter } from './routes/features.js';
 import { photosRouter } from './routes/photos.js';
 import { importRouter } from './routes/import.js';
-import { errorHandler, requireToken } from './middleware/index.js';
+import { membersRouter } from './routes/members.js';
+import { authRouter } from './routes/auth.js';
+import { errorHandler } from './middleware/index.js';
+import { allowedOrigins, requireFarmMember, resolveIdentity } from './middleware/authorize.js';
+import { assertAuthConfig, usersModeOn } from './lib/identity.js';
 import { accessLog, healthStats, log, requestId } from './middleware/observability.js';
 import { query } from './db.js';
+
+// PT33 review — refuse to start in users mode without the issuer to check tokens against.
+assertAuthConfig();
 
 export const app = express();
 // PT35 — before everything else, so even a body-parser refusal has an id and a log line.
 app.use(requestId);
 app.use(accessLog);
-app.use(cors({ exposedHeaders: ['x-request-id'] }));
+// PT33 — CORS. The SPA and the API share one origin (PT21), so no browser
+// caller needs cross-origin access. Evaluated per request:
+//   CORS_ORIGINS set   → only those origins, with credentials;
+//   AUTH_USERS=on      → no cross-origin access at all (same-origin only);
+//   otherwise          → the pre-PT33 `*`, unchanged until users mode ships.
+app.use(
+  cors((_req, cb) => {
+    const list = allowedOrigins();
+    if (list.length > 0) cb(null, { origin: list, credentials: true, exposedHeaders: ['x-request-id'] });
+    else if (usersModeOn()) cb(null, { origin: false });
+    else cb(null, { exposedHeaders: ['x-request-id'] });
+  }),
+);
 app.use(express.json({ limit: '5mb' }));
 
 // PT22: this check MUST touch the database. It previously returned a hardcoded
@@ -54,9 +73,17 @@ app.get('/api/health', async (_req, res) => {
 // Auth gate: mutations require the write token; reads require a read token
 // only when one is configured. Open mode (neither set) is a dev-only state —
 // PT23 makes production refuse writes outright rather than serve them openly.
-app.use(requireToken);
+//
+// PT33 — sign-in routes sit in front of the gate (they are how you get past
+// it). `resolveIdentity` is `requireToken` verbatim unless AUTH_USERS=on.
+app.use('/api/auth', authRouter);
+app.use(resolveIdentity);
 
+// Every /api/farms/:farmId[/...] request: membership check (no-op unless a
+// signed-in person is calling). Nested routers already filter by farm_id.
+app.use('/api/farms/:farmId', requireFarmMember);
 app.use('/api/farms', farmsRouter);
+app.use('/api/farms/:farmId/members', membersRouter);
 app.use('/api/farms/:farmId/paddocks', paddocksRouter);
 app.use('/api/farms/:farmId/poly-runs', polyRunsRouter);
 app.use('/api/farms/:farmId/features', featuresRouter);
@@ -70,6 +97,9 @@ const isMain =
   import.meta.url === pathToFileURL(process.argv[1] ?? '').href;
 
 if (isMain) {
+  if (usersModeOn()) {
+    console.log('[api] AUTH_USERS=on — per-user sign-in; farms are scoped by farm_members');
+  }
   const writeToken = process.env.API_WRITE_TOKEN || process.env.API_TOKEN;
   const readToken = process.env.API_READ_TOKEN;
   if (!writeToken && !readToken) {

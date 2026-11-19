@@ -57,6 +57,19 @@ CREATE TABLE photos (
     client_id    uuid  -- PT38: the uploader's queue-row id; a repeat returns the existing row
 );
 
+-- PT33 — membership: which auth.users id may see/change which farm. Only
+-- consulted when the API runs with AUTH_USERS=on. Mirrors
+-- db/migrations/005_farm_members.sql (the migration also adds the auth.users FK
+-- where that schema exists; a fresh local DB has none).
+CREATE TABLE farm_members (
+    farm_id    uuid NOT NULL REFERENCES farms(id) ON DELETE CASCADE,
+    user_id    uuid NOT NULL,
+    role       text NOT NULL DEFAULT 'editor' CHECK (role IN ('owner', 'editor', 'viewer')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (farm_id, user_id)
+);
+CREATE INDEX farm_members_user_idx ON farm_members (user_id);
+
 CREATE INDEX paddocks_geom_gist  ON paddocks  USING GIST (geom);
 CREATE INDEX poly_runs_geom_gist ON poly_runs USING GIST (geom);
 CREATE INDEX features_geom_gist  ON features  USING GIST (geom);

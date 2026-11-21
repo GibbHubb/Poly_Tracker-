@@ -79,7 +79,9 @@ Body shape: `{ "error": "<sentence>" }`, plus fields named below.
 | 404 | a write points at a farm/feature that is gone (Postgres 23503) | `{ "error": "The farm or record this refers to does not exist…", "requestId" }` |
 | 412 | `If-Match` version is stale | `{ "error": "Precondition failed: expected version 3, current is 4" }` |
 | 413 | body over 5 MB, or a photo over 4 MB | `{ "error": "…" }` |
+| 415 | photo upload that is not JPEG, PNG, WebP or HEIC/HEIF: by declared type, then by its first bytes (PT43) | `{ "error": "Only photos can be uploaded…" }` |
 | 422 | GeoJSON import, all-or-nothing, one feature refused | the import report, see below |
+| 429 | rate limited (PT43): more than `RATE_LIMIT_WRITES` (120) writes, or `RATE_LIMIT_AUTH_FAILURES` (10) 401s that carried a credential, from one IP in a `RATE_LIMIT_WINDOW_SECONDS` (60 s) window. Per function instance, not fleet-wide. `/api/health` is never limited | `{ "error": "Too many requests…", "requestId" }` + `Retry-After` |
 | 500 | anything unanticipated | `{ "error": "Something went wrong on the server. Quote the request id if you report it.", "requestId" }`; the detail is in the log only (PT35) |
 | 503 | writes disabled (above), photo storage unusable, or the database is down (`/api/health`) | `{ "error": "…" }` |
 
@@ -87,6 +89,14 @@ Body shape: `{ "error": "<sentence>" }`, plus fields named below.
 `ETag: "<version>"`. A PATCH may send `If-Match: "<version>"` (`W/"3"` and bare `3` are accepted;
 anything else is a 400). If the row has moved on, the PATCH changes nothing and answers 412. No
 `If-Match` means last-write-wins, which is what the importer and older clients do.
+
+**Every API response** carries `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; …`,
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy:
+strict-origin-when-cross-origin` (PT43). **Logs:** every 401/403 writes a `{"msg":"security","event":"auth.failure"|"auth.forbidden",…}`
+line (route shape, status, request id, client IP, whether a credential was offered — never the credential), and
+every successful DELETE an `{"msg":"audit","event":"delete","path":"/api/farms/<id>",…,"actor":…}` line (role grants:
+`"event":"member.grant"`, with the member id and role). Grep the
+Vercel function logs for `"msg":"security"` / `"msg":"audit"`.
 
 ## Pagination, filtering, sorting
 
@@ -125,7 +135,7 @@ envelope (PT31). Photo lists filter by `?feature_id=` or `?farm_id=`.
 | DELETE | `/api/farms/:farmId/features/:id` | delete | W | 204 | 401, 404, 503 |
 | GET | `/api/photos` | list (`?feature_id=` or `?farm_id=`, else all) | R | 200 array | 401 |
 | GET | `/api/photos/file/:id` | the image: 302 to a 60 s signed URL (`supabase`) or the file (`disk`) | R | 302 / 200 | 401, 404 |
-| POST | `/api/photos` | upload: `photo` file + `feature_type?`, `feature_id?`, `taken_at?`, `lat?`, `lng?`, `client_id?` | W | 201 row; **200** with the existing row when `client_id` was already stored (PT38) | 400, 401, 413, 503 |
+| POST | `/api/photos` | upload: `photo` file + `feature_type?`, `feature_id?`, `taken_at?`, `lat?`, `lng?`, `client_id?` | W | 201 row; **200** with the existing row when `client_id` was already stored (PT38) | 400, 401, 409, 413, 415, 503 |
 | DELETE | `/api/photos/:id` | delete the row, then the stored object | W | 204 | 401, 404, 503 |
 | POST | `/api/import/geojson` | bulk import into a farm: `file` (FeatureCollection) + `farm_id`; `?partial=true` | W | 200 report | 400, 401, 404, **422**, 503 |
 

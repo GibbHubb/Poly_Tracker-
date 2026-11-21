@@ -46,6 +46,14 @@ jobs:
         run: npm ci
         working-directory: web
 
+      # PT43 — dependency scanning. Fails on any high/critical advisory that is
+      # not on the reviewed allowlist (scripts/audit-allowlist.json: reason,
+      # ticket, review-by date). Plain `npm audit --audit-level=high` would be
+      # red from day one on fixes that need breaking majors; see the script.
+      - name: Web dependency audit
+        run: node ../scripts/audit-gate.mjs
+        working-directory: web
+
       - name: Web typecheck
         run: npm run typecheck
         working-directory: web
@@ -68,6 +76,10 @@ jobs:
       # API
       - name: Install api deps
         run: npm ci
+        working-directory: api
+
+      - name: API dependency audit (PT43)
+        run: node ../scripts/audit-gate.mjs
         working-directory: api
 
       - name: API typecheck

@@ -1,0 +1,131 @@
+{
+  "_comment": "PT43 — high/critical advisories that scripts/audit-gate.mjs lets through, each read and judged. Every entry names its package directory ('scope': api or web), and needs a reason, a ticket and a review-by date ('until', YYYY-MM-DD); past that date the gate fails again. Remove an entry when the gate prints it as stale. Never add one without reading the advisory.",
+  "entries": [
+    {
+      "scope": "api",
+      "package": "zod",
+      "ghsa": "GHSA-mrhx-c7xc-m3w5",
+      "severity": "high",
+      "reason": "Memory exhaustion validating oversized constrained collections. Fix is zod 4 only (breaking API). Mitigated here: express.json caps bodies at 5 MB, and polygon rings/positions are counted on the raw arrays before zod parses them (geojson.ts MAX_POLYGON_RINGS / MAX_POLYGON_POSITIONS).",
+      "ticket": "PT43-fu1 (zod 3 -> 4)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "jspdf",
+      "ghsa": "GHSA-f8cm-6447-x5h2",
+      "severity": "critical",
+      "reason": "Local file inclusion: Node-only (jsPDF reading the filesystem). We run jsPDF in the browser only, from exportPdf.ts.",
+      "ticket": "PT43-fu2 (jspdf 2 -> 4, with a browser PDF-export check)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "jspdf",
+      "ghsa": "GHSA-wfv2-pwc8-crg5",
+      "severity": "critical",
+      "reason": "HTML injection in output('dataurlnewwindow'/'pdfobjectnewwindow') paths. exportPdf.ts only calls doc.save(); no new-window output.",
+      "ticket": "PT43-fu2 (jspdf 2 -> 4, with a browser PDF-export check)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "jspdf",
+      "ghsa": "GHSA-w532-jxjh-hjhj",
+      "severity": "high",
+      "reason": "ReDoS on attacker-controlled input to jsPDF parsers. Input is the user's own farm data rendered client-side in their own browser.",
+      "ticket": "PT43-fu2 (jspdf 2 -> 4, with a browser PDF-export check)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "jspdf",
+      "ghsa": "GHSA-8mvj-3j78-4qmw",
+      "severity": "high",
+      "reason": "DoS via crafted input. Client-side only, the user's own data, their own tab.",
+      "ticket": "PT43-fu2 (jspdf 2 -> 4, with a browser PDF-export check)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "jspdf",
+      "ghsa": "GHSA-pqxr-3g65-p328",
+      "severity": "high",
+      "reason": "PDF injection in AcroFormChoiceField. exportPdf.ts uses no AcroForm.",
+      "ticket": "PT43-fu2 (jspdf 2 -> 4, with a browser PDF-export check)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "jspdf",
+      "ghsa": "GHSA-95fx-jjr5-f39c",
+      "severity": "high",
+      "reason": "DoS via unvalidated BMP dimensions. exportPdf.ts adds one PNG it rendered itself from the map canvas; no BMP.",
+      "ticket": "PT43-fu2 (jspdf 2 -> 4, with a browser PDF-export check)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "jspdf",
+      "ghsa": "GHSA-9vjf-qc39-jprp",
+      "severity": "high",
+      "reason": "PDF object injection via addJS. exportPdf.ts never calls addJS.",
+      "ticket": "PT43-fu2 (jspdf 2 -> 4, with a browser PDF-export check)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "jspdf",
+      "ghsa": "GHSA-67pg-wm7f-q7fj",
+      "severity": "high",
+      "reason": "DoS via malicious GIF dimensions. No GIF is ever added (one self-rendered PNG).",
+      "ticket": "PT43-fu2 (jspdf 2 -> 4, with a browser PDF-export check)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "jspdf",
+      "ghsa": "GHSA-p5xg-68wr-hm3m",
+      "severity": "high",
+      "reason": "PDF injection in the AcroForm module (radio buttons). exportPdf.ts uses no AcroForm.",
+      "ticket": "PT43-fu2 (jspdf 2 -> 4, with a browser PDF-export check)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "jspdf",
+      "ghsa": "GHSA-7x6v-j9x4-qf24",
+      "severity": "high",
+      "reason": "PDF object injection via FreeText annotation color. exportPdf.ts creates no annotations.",
+      "ticket": "PT43-fu2 (jspdf 2 -> 4, with a browser PDF-export check)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "maplibre-gl",
+      "ghsa": "GHSA-jrc7-96c5-q579",
+      "severity": "critical",
+      "reason": "XSS sanitizer bypass in DOM.sanitize(), used by Popup.setHTML. The app creates no MapLibre Popup and never passes HTML to MapLibre. MapLibre is held at v3 deliberately (bundle budget, PT32); the fix is v6.",
+      "ticket": "PT43-fu3 (maplibre-gl 3 -> 6)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "tinypool",
+      "ghsa": "GHSA-5gmw-xhrv-c9v3",
+      "severity": "critical",
+      "reason": "Dev-only: the web test runner (vitest 3 -> tinypool). Never shipped to the browser; exploitation needs prototype pollution inside our own test process.",
+      "ticket": "PT43-fu4 (web vitest 3 -> 4, matching api)",
+      "until": "2027-02-28"
+    },
+    {
+      "scope": "web",
+      "package": "tinypool",
+      "ghsa": "GHSA-85c8-ppgw-ccpr",
+      "severity": "critical",
+      "reason": "Dev-only: the web test runner (vitest 3 -> tinypool). Never shipped to the browser; exploitation needs prototype pollution inside our own test process.",
+      "ticket": "PT43-fu4 (web vitest 3 -> 4, matching api)",
+      "until": "2027-02-28"
+    }
+  ]
+}

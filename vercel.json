@@ -15,6 +15,16 @@
   ],
   "routes": [
     {
+      "src": "^/(?!api/)(.*)$",
+      "headers": {
+        "Content-Security-Policy": "default-src 'self'; script-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://api.mapbox.com https://server.arcgisonline.com https://spatial-img.information.qld.gov.au https://*.supabase.co; connect-src 'self' https://api.mapbox.com https://server.arcgisonline.com https://spatial-img.information.qld.gov.au https://nominatim.openstreetmap.org https://*.supabase.co; font-src 'self' data:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "strict-origin-when-cross-origin"
+      },
+      "continue": true
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/src/vercel.ts"
     },

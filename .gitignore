@@ -25,3 +25,6 @@ Thumbs.db
 
 .vercel
 .env*
+
+# PT43 — poly schema dumps (scripts/backup_poly_schema.sh); they hold farm data
+backups/

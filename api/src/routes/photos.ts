@@ -1,4 +1,3 @@
-import { extname } from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
@@ -8,6 +7,7 @@ import { createPhotoStore } from '../storage/index.js';
 import { log } from '../middleware/observability.js';
 import { assertFarmAccess, farmOfFeature, farmOfPhoto, identityOf } from '../middleware/authorize.js';
 import { isUuid } from '../lib/identity.js';
+import { ALLOWED_UPLOAD_MIME, sniffImageType } from '../lib/imageType.js';
 
 /**
  * PT33 — a photo belongs to a farm only through its feature. For a signed-in
@@ -46,9 +46,18 @@ const store = createPhotoStore();
 // this cap sits under the platform limit so an oversize file is refused by US, with
 // a 413 that says why (see errorHandler).
 export const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
+// PT43 — the declared type is checked here, before any bytes are buffered;
+// the bytes themselves are checked in the handler (sniffImageType), which is
+// the check that counts: a Content-Type is just a label the client chose.
+const NOT_AN_IMAGE =
+  'Only photos can be uploaded (JPEG, PNG, WebP or HEIC). This file is not one of those.';
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_PHOTO_BYTES },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_UPLOAD_MIME.has(file.mimetype.toLowerCase())) cb(null, true);
+    else cb(new HttpError(415, NOT_AN_IMAGE));
+  },
 });
 
 const metaInput = z.object({
@@ -157,7 +166,13 @@ photosRouter.get(
     // private and keeps every caller working untouched.
     const resolved = await store.resolve(row.path);
     if (resolved.kind === 'redirect') res.redirect(302, resolved.url);
-    else res.sendFile(resolved.path);
+    else {
+      // PT43 — the API's deny-all CSP would stop a browser rendering the photo
+      // when it is opened as a page (MapView opens it as a navigation). Images
+      // only, nothing else, and still no framing.
+      res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'");
+      res.sendFile(resolved.path);
+    }
   }),
 );
 
@@ -178,6 +193,19 @@ photosRouter.post(
   upload.single('photo'),
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'photo file is required');
+    // PT43 — the bytes decide what this is, and so the stored extension and
+    // content type. The client's filename never reaches the object name.
+    const kind = sniffImageType(req.file.buffer);
+    if (!kind) {
+      log({
+        level: 'warn',
+        msg: 'photo upload refused: not an image',
+        requestId: String(res.locals.requestId ?? ''),
+        declared: req.file.mimetype,
+        bytes: req.file.size,
+      });
+      throw new HttpError(415, NOT_AN_IMAGE);
+    }
     const meta = metaInput.parse(req.body);
     // PT33 — before any bytes are stored: a signed-in person may attach a photo
     // only to a feature on a farm they can edit. A photo with no feature would
@@ -207,11 +235,7 @@ photosRouter.post(
     // Store the bytes BEFORE the row: a row pointing at an object that was
     // never written is a broken image with no way to tell; an object with no
     // row is an orphan, reclaimed by `scripts/sweep-photos.ts` (PT27).
-    const key = await store.put(
-      req.file.buffer,
-      extname(req.file.originalname),
-      req.file.mimetype,
-    );
+    const key = await store.put(req.file.buffer, kind.ext, kind.mime);
     const { rows } = await query<PhotoRow>(
       `INSERT INTO photos (feature_type, feature_id, path, taken_at, lat, lng, client_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7)

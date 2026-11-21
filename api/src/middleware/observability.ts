@@ -131,3 +131,87 @@ export function accessLog(req: Request, res: Response, next: NextFunction): void
   });
   next();
 }
+
+// ---------------------------------------------------------------------------
+// PT43 — security events and the delete audit trail.
+//
+// The access log above already has every request, but a 401 in it is one warn
+// line among many 404s, and a DELETE line names a route shape with the ids
+// folded out — so "who deleted farm X, and when" had no answer. These lines
+// are distinct (`msg: 'security'` / `msg: 'audit'`), so one grep finds them:
+//
+//   security  event=auth.failure (401) | auth.forbidden (403)
+//             method, route shape, status, request id, client IP
+//   audit     event=delete (any successful DELETE) | member.grant (role
+//             granted or changed), the EXACT path (ids kept: that is the
+//             point), status, who (identity kind + user id), request id
+//
+// Never logged: headers, cookies, tokens, bodies (a grant's member id and
+// role excepted: they are the event). Client IP appears only on security
+// lines, where it is the evidence.
+// ---------------------------------------------------------------------------
+
+/** Who made the request, as far as the gate knows (res.locals.identity, set by resolveIdentity). */
+function actorOf(res: Response): { actor: string; userId?: string } {
+  const id = res.locals.identity as { kind?: string; userId?: string; canWrite?: boolean } | undefined;
+  if (!id?.kind) return { actor: 'none' };
+  if (id.kind === 'user') return { actor: 'user', userId: id.userId };
+  if (id.kind === 'legacy') return { actor: id.canWrite ? 'legacy-write-token' : 'legacy-read-token' };
+  // Users mode off: the shared write token let a DELETE through, or nothing was configured (dev).
+  return { actor: process.env.API_WRITE_TOKEN || process.env.API_TOKEN ? 'write-token' : 'open' };
+}
+
+export function createSecurityLog(ipOf: (req: Request) => string) {
+  return function securityLog(req: Request, res: Response, next: NextFunction): void {
+    res.on('finish', () => {
+      const status = res.statusCode;
+      const requestId = String(res.locals.requestId ?? '');
+      const path = req.originalUrl.split('?')[0] ?? req.originalUrl;
+      const credential = req.headers.authorization ? 'bearer' : req.headers.cookie ? 'cookie' : 'none';
+      // `GET /api/auth/me` with nothing presented is the SPA asking "am I signed
+      // in?" on every load in users mode: an answer, not a failed attempt.
+      const probe = path === '/api/auth/me' && credential === 'none';
+      if ((status === 401 || status === 403) && !probe) {
+        log({
+          level: 'warn',
+          msg: 'security',
+          event: status === 401 ? 'auth.failure' : 'auth.forbidden',
+          requestId,
+          method: req.method,
+          path: routeShape(path),
+          status,
+          ip: ipOf(req),
+          // Whether a credential was offered, never what it was.
+          credential,
+        });
+      }
+      // Granting or changing a role is the other sensitive write (members.ts upserts on POST).
+      if (req.method === 'POST' && status >= 200 && status < 300 && /^\/api\/farms\/[^/]+\/members\/?$/.test(path)) {
+        const body = (req.body ?? {}) as { user_id?: unknown; role?: unknown };
+        log({
+          level: 'info',
+          msg: 'audit',
+          event: 'member.grant',
+          requestId,
+          path,
+          status,
+          member: typeof body.user_id === 'string' ? body.user_id : undefined,
+          role: typeof body.role === 'string' ? body.role : 'editor',
+          ...actorOf(res),
+        });
+      }
+      if (req.method === 'DELETE' && status >= 200 && status < 300 && !path.startsWith('/api/auth/')) {
+        log({
+          level: 'info',
+          msg: 'audit',
+          event: 'delete',
+          requestId,
+          path,
+          status,
+          ...actorOf(res),
+        });
+      }
+    });
+    next();
+  };
+}

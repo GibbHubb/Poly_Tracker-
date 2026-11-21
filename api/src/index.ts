@@ -12,7 +12,9 @@ import { authRouter } from './routes/auth.js';
 import { errorHandler } from './middleware/index.js';
 import { allowedOrigins, requireFarmMember, resolveIdentity } from './middleware/authorize.js';
 import { assertAuthConfig, usersModeOn } from './lib/identity.js';
-import { accessLog, healthStats, log, requestId } from './middleware/observability.js';
+import { accessLog, createSecurityLog, healthStats, log, requestId } from './middleware/observability.js';
+import { securityHeaders } from './middleware/securityHeaders.js';
+import { clientIp, createRateLimiter, rateLimitFromEnv } from './middleware/rateLimit.js';
 import { query } from './db.js';
 
 // PT33 review — refuse to start in users mode without the issuer to check tokens against.
@@ -22,6 +24,13 @@ export const app = express();
 // PT35 — before everything else, so even a body-parser refusal has an id and a log line.
 app.use(requestId);
 app.use(accessLog);
+// PT43 — nosniff / DENY / deny-all CSP on every API response (the SPA's CSP is vercel.json's).
+app.use(securityHeaders);
+// PT43 — one `security` line per 401/403; one `audit` line per successful DELETE or role grant.
+app.use(createSecurityLog(clientIp));
+// PT43 — per-instance throttle on repeated auth failures and on writes; before
+// the body parser, so a refused write is not parsed first. RATE_LIMIT=off disables it.
+app.use(createRateLimiter(rateLimitFromEnv()));
 // PT33 — CORS. The SPA and the API share one origin (PT21), so no browser
 // caller needs cross-origin access. Evaluated per request:
 //   CORS_ORIGINS set   → only those origins, with credentials;

@@ -3,6 +3,7 @@
 ## Contents
 
 - [baseline-checklist.md](baseline-checklist.md) -- OWASP ASVS L1 security baseline checklist
+- [operations.md](operations.md) -- backup + restore drill, secret rotation schedule, post-deploy header check (PT43)
 
 ## How to use
 

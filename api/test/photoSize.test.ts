@@ -12,7 +12,8 @@ afterAll(closePool);
 describe('photos — size limit (PT26)', () => {
   const jpegOf = (bytes: number) => {
     const b = Buffer.alloc(bytes, 0x41);
-    b[0] = 0xff; b[1] = 0xd8; // JPEG magic; the API stores bytes, it does not decode them
+    // JPEG signature (PT43: the API checks it); the API stores bytes, it does not decode them.
+    b[0] = 0xff; b[1] = 0xd8; b[2] = 0xff;
     return b;
   };
 

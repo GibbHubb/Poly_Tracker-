@@ -1,0 +1,26 @@
+# PT43 — dependency update PRs, weekly. The CI audit gate (scripts/audit-gate.mjs)
+# says when a CVE is present; this proposes the fix. Majors that need real work
+# (maplibre-gl, zod, jspdf, vitest in web) arrive as PRs too: do not merge one
+# without its ticket (see scripts/audit-allowlist.json) and a browser check.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /api
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      api-minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      web-minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

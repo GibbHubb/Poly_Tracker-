@@ -1,10 +1,12 @@
 /**
  * PT44 — the one name shape both backends' `put` produces:
  *
- *   `${randomUUID()}${ext || '.jpg'}`, with `ext = extname(originalname)` in routes/photos.ts
+ *   `${randomUUID()}${ext || '.jpg'}`, with `ext` from the sniffed bytes in routes/photos.ts
  *
- * randomUUID() is a lowercase v4 UUID, and extname() returns '' or a single dot-led segment
- * with no further dot, so every name `put` wrote is `<v4 uuid>.<anything but a dot or a slash>`.
+ * randomUUID() is a lowercase v4 UUID. Since PT43 `ext` is one of .jpg/.png/.webp/.heic/.heif
+ * (lib/imageType.ts); before it was extname(originalname), '' or a single dot-led segment with
+ * no further dot. Either way every name `put` wrote is `<v4 uuid>.<anything but a dot or a
+ * slash>`, and older objects keep matching.
  *
  * `list()` returns ONLY names of this shape. The orphan sweep deletes what `list()` returns,
  * so anything else in the directory or bucket (a .gitkeep, `x.jpg.bak`, an operator's notes,

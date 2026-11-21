@@ -20,7 +20,7 @@ problem.
 
 | File | What it does |
 |---|---|
-| `vercel.json` | static build from `web/`, `/api/*` → the function, SPA fallback for everything else, `no-cache` on `sw.js` |
+| `vercel.json` | static build from `web/`, `/api/*` → the function, SPA fallback for everything else, `no-cache` on `sw.js`, and (PT43) the SPA's security headers — CSP, nosniff, `X-Frame-Options: DENY`, Referrer-Policy — on every non-`/api` path. A new external host (tiles, a fetch) must be added to its CSP; `web/src/lib/csp.test.ts` fails until it is |
 | `api/src/vercel.ts` | re-exports the Express `app` as the function handler. It lives inside `src/` because `tsconfig` sets `rootDir=src` |
 | `api/src/db.ts` | caps the pool at 1 when `VERCEL` is set — a serverless deploy runs many short-lived instances against one Postgres, and a default pool of 10 per instance multiplies into connection exhaustion |
 
@@ -36,6 +36,7 @@ problem.
    | `PGSSL` | `true` |
    | `API_WRITE_TOKEN` | any long random string; writes fail closed without it (PT23) |
    | `VITE_MAPBOX_TOKEN` | `pk.…`, baked into the client bundle at build time |
+   | `RATE_LIMIT` *(optional, PT43)* | unset = on. `off` disables the limiter without a code change. Tunables: `RATE_LIMIT_WRITES` (120), `RATE_LIMIT_AUTH_FAILURES` (10), `RATE_LIMIT_WINDOW_SECONDS` (60). Counts are per function instance |
 
    **Do not set `VITE_API_BASE`.**
 3. Push to `main`. Vercel builds from git.
@@ -176,6 +177,11 @@ branch-scoped environment variable so only that branch is affected.
 
   Local dev and the test suite are unaffected: without `NODE_ENV=production`
   the gate stays in open mode exactly as before.
+
+- **Security operations (PT43).** Backups + the restore drill, the secret rotation schedule and the
+  post-deploy header check are in [`docs/security/operations.md`](docs/security/operations.md). Self-hosted
+  behind nginx, set `TRUST_PROXY=1` on the API so the rate limiter keys on `X-Real-IP` rather than on nginx's
+  address (Vercel's forwarding headers are trusted automatically).
 
 ## Local development is unchanged
 

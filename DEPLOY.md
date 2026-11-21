@@ -36,7 +36,7 @@ problem.
    | `PGSSL` | `true` |
    | `API_WRITE_TOKEN` | any long random string; writes fail closed without it (PT23) |
    | `VITE_MAPBOX_TOKEN` | `pk.…`, baked into the client bundle at build time |
-   | `RATE_LIMIT` *(optional, PT43)* | unset = on. `off` disables the limiter without a code change. Tunables: `RATE_LIMIT_WRITES` (120), `RATE_LIMIT_AUTH_FAILURES` (10), `RATE_LIMIT_WINDOW_SECONDS` (60). Counts are per function instance |
+   | `RATE_LIMIT` *(optional, PT43)* | unset = on. `off` disables the limiter without a code change. Tunables: `RATE_LIMIT_WRITES` (120), `RATE_LIMIT_AUTH_FAILURES` (10, per credential), `RATE_LIMIT_AUTH_DISTINCT` (20 distinct failing credentials per IP), `RATE_LIMIT_WINDOW_SECONDS` (60). Counts are per function instance |
 
    **Do not set `VITE_API_BASE`.**
 3. Push to `main`. Vercel builds from git.
@@ -181,7 +181,8 @@ branch-scoped environment variable so only that branch is affected.
 - **Security operations (PT43).** Backups + the restore drill, the secret rotation schedule and the
   post-deploy header check are in [`docs/security/operations.md`](docs/security/operations.md). Self-hosted
   behind nginx, set `TRUST_PROXY=1` on the API so the rate limiter keys on `X-Real-IP` rather than on nginx's
-  address (Vercel's forwarding headers are trusted automatically).
+  address (without `X-Real-IP` it takes the right-most `X-Forwarded-For` hop, the one nginx appended; Vercel's
+  forwarding headers are trusted automatically).
 
 ## Local development is unchanged
 

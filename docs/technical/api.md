@@ -81,7 +81,7 @@ Body shape: `{ "error": "<sentence>" }`, plus fields named below.
 | 413 | body over 5 MB, or a photo over 4 MB | `{ "error": "…" }` |
 | 415 | photo upload that is not JPEG, PNG, WebP or HEIC/HEIF: by declared type, then by its first bytes (PT43) | `{ "error": "Only photos can be uploaded…" }` |
 | 422 | GeoJSON import, all-or-nothing, one feature refused | the import report, see below |
-| 429 | rate limited (PT43): more than `RATE_LIMIT_WRITES` (120) writes, or `RATE_LIMIT_AUTH_FAILURES` (10) 401s that carried a credential, from one IP in a `RATE_LIMIT_WINDOW_SECONDS` (60 s) window. Per function instance, not fleet-wide. `/api/health` is never limited | `{ "error": "Too many requests…", "requestId" }` + `Retry-After` |
+| 429 | rate limited (PT43), per `RATE_LIMIT_WINDOW_SECONDS` (60 s) window: more than `RATE_LIMIT_WRITES` (120) writes from one IP; `RATE_LIMIT_AUTH_FAILURES` (10) 401s for the same credential from one IP (only that credential is refused; a hash of it is kept, never the credential); or `RATE_LIMIT_AUTH_DISTINCT` (20) distinct failing credentials from one IP (then credentials that have not succeeded from that IP in the last 15 windows are refused). Requests with no credential, `/api/auth/*` and `/api/health` are never limited by the credential counters. Per function instance, not fleet-wide | `{ "error": "Too many requests…", "requestId" }` + `Retry-After` |
 | 500 | anything unanticipated | `{ "error": "Something went wrong on the server. Quote the request id if you report it.", "requestId" }`; the detail is in the log only (PT35) |
 | 503 | writes disabled (above), photo storage unusable, or the database is down (`/api/health`) | `{ "error": "…" }` |
 

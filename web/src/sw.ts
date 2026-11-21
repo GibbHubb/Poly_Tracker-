@@ -3,6 +3,7 @@ import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { CacheFirst, NetworkFirst, StaleWhileRevalidate } from 'workbox-strategies';
 import { CacheableResponsePlugin } from 'workbox-cacheable-response';
+import { createServerErrorFallbackPlugin } from './lib/swServerErrorFallback';
 import { ExpirationPlugin } from 'workbox-expiration';
 
 declare let self: ServiceWorkerGlobalScope;
@@ -88,6 +89,8 @@ registerRoute(
     // PT29 — bounded. The farm snapshot in IndexedDB is now the offline copy
     // that matters; this cache is a fallback and must not grow forever.
     plugins: [
+      // PT43 review — a 429 or 5xx falls back to the cached copy (when there is one).
+      createServerErrorFallbackPlugin(),
       new CacheableResponsePlugin({ statuses: [0, 200] }),
       new ExpirationPlugin({
         maxEntries: 200,

@@ -201,7 +201,8 @@ photosRouter.post(
         level: 'warn',
         msg: 'photo upload refused: not an image',
         requestId: String(res.locals.requestId ?? ''),
-        declared: req.file.mimetype,
+        // Client-chosen text: bounded so it cannot flood the log line.
+        declared: req.file.mimetype.slice(0, 80),
         bytes: req.file.size,
       });
       throw new HttpError(415, NOT_AN_IMAGE);

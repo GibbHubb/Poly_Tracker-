@@ -20,7 +20,7 @@ a deployment-wide bearer token (read tier optional, write tier required in produ
 - [ ] Minimum password length enforced (8+ characters) — PT33
 - [ ] Breached password checking or dictionary check in place — PT33
 - [ ] 2FA/MFA supported for all user accounts — PT33
-- [x] Account lockout or rate limiting after repeated failed login attempts — PT43: 10 credential-carrying 401s from one IP in 60 s → 429 for the rest of the window (`api/src/middleware/rateLimit.ts`, `api/test/rateLimit.test.ts`); also covers `POST /api/auth/session`. Per function instance, not fleet-wide (documented)
+- [x] Account lockout or rate limiting after repeated failed login attempts — PT43: 10 401s for the same credential from one IP in 60 s → that credential gets 429 for the rest of the window (keyed on IP + a hash of the credential, so a stale token on one device does not lock out the others behind the same farm wifi); 20 distinct failing credentials from one IP (a brute force) → credentials not recently proven from that IP get 429 (`api/src/middleware/rateLimit.ts`, `api/test/rateLimit.test.ts`). `/api/auth/*` is exempt so a stale session can always sign in again. Per function instance, not fleet-wide (documented)
 - [ ] Password reset uses a time-limited, single-use token — PT33
 - [x] Authentication credentials are never logged or exposed in URLs — the token travels only in the `Authorization` header; `accessLog` logs method, route shape, status and timing, not headers
 

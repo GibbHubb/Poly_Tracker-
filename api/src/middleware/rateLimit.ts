@@ -7,17 +7,30 @@
 // loop replaying writes — and it costs nothing. A fleet-wide limit needs a
 // shared store (Upstash/Redis), which is deliberately not taken on here.
 //
-// Two limits:
-//   auth failures  — after AUTH_FAILURES_MAX 401s from one IP inside the window,
-//                    every request from that IP gets 429 until the window ends;
+// Three limits:
+//   one bad credential — after AUTH_FAILURES_MAX 401s for the SAME credential
+//                    from one IP inside the window, requests carrying THAT
+//                    credential get 429 until the window ends. Keyed on IP + a
+//                    hash of the credential (the credential is never stored),
+//                    so one device with a stale or rotated token behind shared
+//                    farm wifi / CGNAT does not lock out the other devices there;
+//   many bad credentials — after AUTH_DISTINCT_MAX distinct failing credentials
+//                    from one IP inside the window (a brute force: every guess
+//                    is new), requests from that IP with a credential that has
+//                    not succeeded from it recently get 429. Devices that were
+//                    already working keep working;
 //   writes         — more than WRITES_MAX mutations per IP per window → 429.
-// /api/health is never limited (it is the operator's probe).
+// Requests with no credential are never limited by the first two (nothing is
+// being guessed). /api/health is never limited (the operator's probe), and
+// /api/auth/* is never limited by the credential counters: that is the
+// sign-in that fixes a stale cookie. It still counts toward the write limit.
 //
 // 429 is safe for the web client: the offline edit queue and the photo queue
 // both treat it as retryable (web/src/lib/notify.ts RETRYABLE_4XX,
 // photoQueue.ts TRANSIENT_4XX), so a throttled replay waits and tries again,
 // it is never dropped.
 import type { NextFunction, Request, Response } from 'express';
+import { createHash } from 'node:crypto';
 import { log, routeShape } from './observability.js';
 
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
@@ -60,7 +73,8 @@ export class FixedWindowCounter {
  * The caller's IP. On Vercel the platform overwrites `x-real-ip` /
  * `x-forwarded-for` with the real client address, so they can be trusted
  * there; elsewhere they are only trusted when TRUST_PROXY=1 (self-hosted behind
- * nginx, which sets X-Real-IP). Otherwise the socket address, so a direct
+ * nginx, which sets X-Real-IP; failing that, the right-most X-Forwarded-For
+ * hop). Otherwise the socket address, so a direct
  * caller cannot pick its own key by sending a header.
  */
 export function clientIp(req: Request): string {
@@ -68,16 +82,23 @@ export function clientIp(req: Request): string {
   if (trust) {
     const real = req.get('x-real-ip');
     if (real) return real.trim();
+    // The RIGHT-most hop is the one our proxy appended; everything to its
+    // left came from the client and can say anything.
     const fwd = req.get('x-forwarded-for');
-    if (fwd) return fwd.split(',')[0]!.trim();
+    if (fwd) {
+      const hops = fwd.split(',').map((h) => h.trim()).filter(Boolean);
+      if (hops.length) return hops[hops.length - 1]!;
+    }
   }
   return req.socket?.remoteAddress ?? 'unknown';
 }
 
 export interface RateLimitOptions {
   windowMs: number;
-  /** 401s from one IP inside a window before that IP is refused. */
+  /** 401s for one credential from one IP inside a window before that credential is refused. */
   authFailuresMax: number;
+  /** Distinct failing credentials from one IP inside a window before unproven credentials from it are refused. */
+  authDistinctMax: number;
   /** Mutations from one IP inside a window. */
   writesMax: number;
   now?: () => number;
@@ -101,6 +122,7 @@ export function rateLimitFromEnv(): RateLimitOptions | null {
   return {
     windowMs: intEnv('RATE_LIMIT_WINDOW_SECONDS', 60) * 1000,
     authFailuresMax: intEnv('RATE_LIMIT_AUTH_FAILURES', 10),
+    authDistinctMax: intEnv('RATE_LIMIT_AUTH_DISTINCT', 20),
     writesMax: intEnv('RATE_LIMIT_WRITES', 120),
   };
 }
@@ -124,25 +146,53 @@ function refuse(req: Request, res: Response, resetAt: number, now: number, reaso
   });
 }
 
+/**
+ * A short, one-way fingerprint of whatever credential the request offered
+ * (bearer header and/or cookie), or null when it offered none. Only this hash
+ * is kept, never the credential.
+ */
+export function credentialKey(req: Request): string | null {
+  const auth = req.headers.authorization ?? '';
+  const cookie = req.headers.cookie ?? '';
+  if (!auth && !cookie) return null;
+  return createHash('sha256').update(`${auth}\n${cookie}`).digest('hex').slice(0, 32);
+}
+
+/** How long a credential that worked from an IP stays exempt from the many-credentials limit. */
+const PROVEN_WINDOWS = 15;
+
 /** Build the limiter middleware. `null` options → a pass-through. */
 export function createRateLimiter(opts: RateLimitOptions | null) {
   if (!opts) {
     return (_req: Request, _res: Response, next: NextFunction) => next();
   }
   const now = opts.now ?? Date.now;
-  const failures = new FixedWindowCounter(opts.windowMs, now);
-  const writes = new FixedWindowCounter(opts.windowMs, now);
+  const failures = new FixedWindowCounter(opts.windowMs, now); // ip|credential → 401s
+  const distinct = new FixedWindowCounter(opts.windowMs, now); // ip → distinct failing credentials
+  const proven = new FixedWindowCounter(opts.windowMs * PROVEN_WINDOWS, now); // ip|credential → successes
+  const writes = new FixedWindowCounter(opts.windowMs, now); // ip → mutations
 
   return function rateLimit(req: Request, res: Response, next: NextFunction): void {
-    if (req.originalUrl.split('?')[0] === '/api/health') {
+    const path = req.originalUrl.split('?')[0] ?? '';
+    if (path === '/api/health') {
       next();
       return;
     }
     const ip = clientIp(req);
-    const failed = failures.peek(ip);
-    if (failed.count >= opts.authFailuresMax) {
-      refuse(req, res, failed.resetAt, now(), 'auth_failures', ip);
-      return;
+    const cred = credentialKey(req);
+    const authRoute = path.startsWith('/api/auth/');
+    const key = cred ? `${ip}|${cred}` : null;
+    if (key && !authRoute) {
+      const failed = failures.peek(key);
+      if (failed.count >= opts.authFailuresMax) {
+        refuse(req, res, failed.resetAt, now(), 'auth_failures', ip);
+        return;
+      }
+      const spread = distinct.peek(ip);
+      if (spread.count >= opts.authDistinctMax && proven.peek(key).count === 0) {
+        refuse(req, res, spread.resetAt, now(), 'auth_distinct_credentials', ip);
+        return;
+      }
     }
     if (MUTATING_METHODS.has(req.method)) {
       const w = writes.hit(ip);
@@ -151,17 +201,19 @@ export function createRateLimiter(opts: RateLimitOptions | null) {
         return;
       }
     }
-    // Count this request's 401, if it ends as one AND it presented a
-    // credential: a guess always carries one, while a signed-out browser in
-    // users mode gets a 401 on every call it makes without one, and must not
-    // be locked out of the very sign-in it is about to do. /api/auth/me is a
-    // "am I signed in?" probe, not a credential check. The 429s above are not
-    // counted: being throttled must not extend the throttle.
-    const presented = Boolean(req.headers.authorization || req.headers.cookie);
-    const probe = req.originalUrl.split('?')[0] === '/api/auth/me';
-    res.on('finish', () => {
-      if (res.statusCode === 401 && presented && !probe) failures.hit(ip);
-    });
+    // Only requests that offered a credential are counted: a signed-out
+    // browser gets a 401 on every call it makes without one, and nothing is
+    // being guessed. The 429s above are not counted: being throttled must not
+    // extend the throttle.
+    if (key && !authRoute) {
+      res.on('finish', () => {
+        if (res.statusCode === 401) {
+          if (failures.hit(key).count === 1) distinct.hit(ip);
+        } else if (res.statusCode < 400) {
+          proven.hit(key);
+        }
+      });
+    }
     next();
   };
 }

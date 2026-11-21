@@ -136,8 +136,9 @@ tables, rename the schema aside (`ALTER SCHEMA poly RENAME TO poly_broken_<date>
 3. On every device: open the app → **Settings** → paste the new token.
    Until a device is updated its writes answer **401**. The offline edit queue and the photo queue treat 401 as
    retryable, so nothing queued is lost: edits wait on the device and sync once the token is updated.
-   Repeated 401s from one device can trip the auth-failure limit (10 per minute per IP, PT43) for a minute:
-   wait it out.
+   A device still sending the OLD token trips the per-credential limit (10 failures per minute, PT43) and gets
+   429 for that minute, but only for the old token: other devices on the same farm wifi are not affected, and
+   the moment it has the new token it is through.
 4. Check: `curl -s -o /dev/null -w '%{http_code}\n' -X POST https://poly-tracker-ashy.vercel.app/api/farms -H 'Authorization: Bearer <old token>' -H 'Content-Type: application/json' -d '{}'` → `401`.
 5. Update `backlog_bandit/.env` if the token is recorded there (the verify harnesses read it).
 
@@ -174,7 +175,18 @@ curl -sI https://poly-tracker-ashy.vercel.app/ | grep -iE 'content-security-poli
 curl -sI https://poly-tracker-ashy.vercel.app/api/health | grep -iE 'content-security-policy|x-content-type|x-frame'
 ```
 
-Expect the SPA CSP on `/` and `default-src 'none'` on `/api/health`, never both on one response. Then open the
+Expect the SPA CSP on `/` and `default-src 'none'` on `/api/health`, never both on one response.
+
+Two things the CSP assumes, which will bite when they change:
+
+- **Supabase is reached at `https://*.supabase.co`.** The magic-link call (`connect-src`) and the signed photo
+  URLs the API redirects to (`img-src`) are allowed by that wildcard only. If the project ever moves to a
+  **custom Supabase domain**, add it to both directives in `vercel.json`, or sign-in and photos break with a CSP
+  error and nothing else.
+- **Preview deployments block the Vercel toolbar.** `vercel.json` applies the same headers to preview URLs,
+  and the CSP allows neither `vercel.live` scripts nor framing, so the preview comments/feedback toolbar does
+  not load (console: `Refused to load the script 'https://vercel.live/…'`). That is expected, not a bug in the
+  app. If the toolbar is wanted, disable it in the Vercel project settings rather than widening the CSP. Then open the
 map with devtools → Console and switch through all three basemaps, open a photo, export a PDF: any
 `Refused to … because it violates the following Content Security Policy directive` line names the missing host.
 Add it to `vercel.json` **and** let `web/src/lib/csp.test.ts` tell you if the code names it too.

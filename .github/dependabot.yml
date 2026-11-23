@@ -1,7 +1,13 @@
 # PT43 — dependency update PRs, weekly. The CI audit gate (scripts/audit-gate.mjs)
-# says when a CVE is present; this proposes the fix. Majors that need real work
-# (maplibre-gl, zod, jspdf, vitest in web) arrive as PRs too: do not merge one
-# without its ticket (see scripts/audit-allowlist.json) and a browser check.
+# says when a CVE is present; this proposes the fix.
+# PT49 (2026-11-23) — npm MAJOR versions are ignored here. They arrived as PRs
+# that mostly failed CI at install (react-dom, vitest 5, tailwind 4, zod 4,
+# @types/node 26), and each one is a migration, not a bump: PT43 already said
+# never to merge one without its own ticket (see scripts/audit-allowlist.json)
+# and a browser check. A major now
+# starts as a ticket, not a PR. Security is still covered: the audit gate fails
+# CI on any known vulnerability, whatever its version. Minor and patch updates
+# keep coming as one grouped PR per directory; GitHub Actions majors still come.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -12,6 +18,9 @@ updates:
     groups:
       api-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: npm
     directory: /web
     schedule:
@@ -20,6 +29,9 @@ updates:
     groups:
       web-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

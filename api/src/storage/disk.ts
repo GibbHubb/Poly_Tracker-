@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { readdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { PhotoStore, ResolvedPhoto, StoredObject } from './index.js';
 import { isStoredObjectName } from './objectName.js';
@@ -68,17 +68,27 @@ export function createDiskStore(env: NodeJS.ProcessEnv): PhotoStore {
         if (!entry.isFile() || !isStoredObjectName(entry.name)) continue;
         const key = join(root, entry.name);
         let modifiedAt: Date;
+        let size: number;
         try {
-          modifiedAt = (await stat(key)).mtime;
+          const st = await stat(key);
+          modifiedAt = st.mtime;
+          size = st.size;
         } catch (err) {
           // PT44 — deleted since readdir (a concurrent DELETE). Gone is gone;
           // one vanished file must not abort the whole listing.
           if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
           throw err;
         }
-        out.push({ key, modifiedAt });
+        out.push({ key, modifiedAt, size });
       }
       return out;
+    },
+    async read(key) {
+      // Same guard as resolve(): a bare object key is a Supabase row.
+      if (!isAbsolute(key)) {
+        throw new Error('This photo lives in object storage, not on local disk. Set PHOTO_BACKEND=supabase.');
+      }
+      return readFile(key);
     },
   };
 }

@@ -104,7 +104,13 @@ export function createSupabaseStore(env: NodeJS.ProcessEnv): PhotoStore {
           console.error(`[photos] list failed: HTTP ${res.status}`, await res.text());
           throw new Error('Could not list stored photos.');
         }
-        const page = (await res.json()) as { name: string; id: string | null; updated_at?: string; created_at?: string }[];
+        const page = (await res.json()) as {
+          name: string;
+          id: string | null;
+          updated_at?: string;
+          created_at?: string;
+          metadata?: { size?: number } | null;
+        }[];
         for (const o of page) {
           if (o.id === null) continue; // a folder placeholder, not an object
           // PT44 — only what `put` wrote; the sweep removes whatever this returns.
@@ -113,11 +119,30 @@ export function createSupabaseStore(env: NodeJS.ProcessEnv): PhotoStore {
           // the sweep treats as too new), never as the epoch, which made a fresh
           // upload look decades old.
           const when = o.updated_at ?? o.created_at;
-          out.push({ key: o.name, modifiedAt: when ? new Date(when) : new Date(Number.NaN) });
+          const size = o.metadata?.size;
+          out.push({
+            key: o.name,
+            modifiedAt: when ? new Date(when) : new Date(Number.NaN),
+            ...(typeof size === 'number' ? { size } : {}),
+          });
         }
         if (page.length < PAGE) break;
       }
       return out;
+    },
+    async read(objectKey) {
+      // PT47 — a plain authenticated GET: read-only, no signed URL minted.
+      if (isAbsolute(objectKey)) {
+        throw new Error('This photo was stored on local disk, not in object storage.');
+      }
+      const res = await fetch(`${url}/storage/v1/object/authenticated/${bucket}/${encodeURI(objectKey)}`, {
+        headers: auth,
+      });
+      if (!res.ok) {
+        // Status only: the body can name buckets and policies (see put()).
+        throw new Error(`Could not read ${objectKey}: HTTP ${res.status}`);
+      }
+      return Buffer.from(await res.arrayBuffer());
     },
   };
 }

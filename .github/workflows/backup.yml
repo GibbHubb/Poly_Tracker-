@@ -1,0 +1,137 @@
+# PT47 — weekly backup of the `poly` schema AND the photo bytes, as an ENCRYPTED artifact.
+#
+# Why encrypted: this repository is PUBLIC, and a public repo's workflow artifacts can be
+# downloaded by any signed-in GitHub user. The dump holds farm names and photo locations and
+# the photos are the farm, so nothing leaves this job in plain text. The artifact is one
+# `tar | gpg --symmetric` (AES256) file; without BACKUP_PASSPHRASE it is noise.
+#
+# What it runs is exactly the runbook (docs/security/operations.md §1): scripts/backup_poly_schema.sh
+# for the rows, api/scripts/backup-photos.ts for the bytes (read-only against Storage, checked
+# against the `photos` rows). Then it proves the artifact decrypts and holds every object
+# before uploading it, and opens an issue if any step fails.
+#
+# Repository secrets (Settings → Secrets and variables → Actions). The job refuses to run,
+# naming the missing one, if any is unset:
+#   POLY_TRACKER_DATABASE_URL  the poly_app pooler DSN (same as Vercel's DATABASE_URL, no ?sslmode)
+#   SUPABASE_URL               https://<project-ref>.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY  the Storage read; shared by every app in the project (see operations.md)
+#   BACKUP_PASSPHRASE          long random string; keep a copy OUTSIDE GitHub or the backups are unreadable
+#
+# Secrets reach steps only as env, by name. Nothing here echoes them, and none appears on a
+# command line except inside the dump script's docker call, where GitHub masks it.
+#
+# Note: GitHub disables scheduled workflows in a public repo after 60 days with no commits.
+# The Actions tab then shows a banner; re-enable it there.
+
+name: Backup
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"   # Mondays 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Refuse to run without every secret
+        env:
+          POLY_TRACKER_DATABASE_URL: ${{ secrets.POLY_TRACKER_DATABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          missing=0
+          for name in POLY_TRACKER_DATABASE_URL SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY BACKUP_PASSPHRASE; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository secret $name is not set. No backup was taken."
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Install api deps
+        run: npm ci
+        working-directory: api
+
+      - name: Dump the poly schema
+        env:
+          POLY_TRACKER_DATABASE_URL: ${{ secrets.POLY_TRACKER_DATABASE_URL }}
+          BACKUP_PG_DUMP: docker
+        run: |
+          echo "STAMP=$(date -u +%Y-%m-%dT%H%MZ)" >> "$GITHUB_ENV"
+          scripts/backup_poly_schema.sh out
+
+      - name: Back up the photo bytes
+        working-directory: api
+        env:
+          DATABASE_URL: ${{ secrets.POLY_TRACKER_DATABASE_URL }}
+          PGSSL: 'true'
+          PHOTO_BACKEND: supabase
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npx tsx scripts/backup-photos.ts --out ../out/photos
+
+      - name: Encrypt, then prove the artifact decrypts and is complete
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          file="poly-backup-$STAMP.tar.gpg"
+          tar -C out -cf - . \
+            | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+                  --symmetric --cipher-algo AES256 --output "$file" 3<<<"$BACKUP_PASSPHRASE"
+          expected=$(node -e "console.log(require('./out/photos/manifest.json').objects.length)")
+          listing=$(gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 --decrypt "$file" 3<<<"$BACKUP_PASSPHRASE" | tar -tf -)
+          objects=$(printf '%s\n' "$listing" | grep -c '^\./photos/objects/.' || true)
+          dumps=$(printf '%s\n' "$listing" | grep -c '^\./poly_schema_.*\.sql$' || true)
+          echo "artifact: $(wc -c < "$file") bytes · ${dumps} dump · ${objects} photo object(s), manifest says ${expected}"
+          if [ "$dumps" -ne 1 ] || [ "$objects" -ne "$expected" ]; then
+            echo "::error::The encrypted artifact does not hold what was backed up."
+            exit 1
+          fi
+          rm -rf out
+          echo "FILE=$file" >> "$GITHUB_ENV"
+
+      - name: Upload encrypted artifact (35 days)
+        uses: actions/upload-artifact@v6
+        with:
+          name: poly-backup-${{ env.STAMP }}
+          path: ${{ env.FILE }}
+          retention-days: 35
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Open or update an issue on failure
+        if: failure()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const title = "Backup failed";
+            const body = `The weekly poly + photos backup failed: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const { data: open } = await github.rest.issues.listForRepo({
+              ...context.repo, state: "open", labels: "ops-alarm", per_page: 50,
+            });
+            const existing = open.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body });
+            } else {
+              await github.rest.issues.create({ ...context.repo, title, body, labels: ["ops-alarm"] });
+            }

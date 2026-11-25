@@ -9,11 +9,16 @@ Every command below is scoped to the `poly` schema or to Poly Tracker's own sett
 
 ---
 
-## 1. Backup and restore drill (`poly` schema)
+## 1. Backup and restore drill (`poly` schema + photo bytes)
 
-**Schedule:** a dump before every migration, and at least **monthly** while there is real data. A restore drill
-(steps 1.2 to 1.4) **once now**, then **every 6 months**, and after any change to `db/init` or `db/migrations`.
+**Schedule:** a dump before every migration, and at least **monthly** while there is real data. Since PT47 the
+`Backup` GitHub Action (1.8) takes both halves every Monday; the manual steps below are the same commands, for
+before a migration and for the drill. A restore drill (steps 1.2 to 1.4 for rows, 1.7 for photos) **once now**,
+then **every 6 months**, and after any change to `db/init`, `db/migrations` or `api/src/storage/`.
 A backup that has never been restored is a hope, not a backup.
+
+A backup is **two halves taken together**: the `poly` dump (1.1, the rows, including `photos.path`) and the photo
+bucket (1.6, the bytes those paths name). Either alone restores broken photos, or bytes nothing points at.
 
 The Supabase free plan's own daily backups are not relied on (no point-in-time restore, short retention, and a
 restore there rolls back the whole shared project, other apps included).
@@ -100,10 +105,10 @@ curl -s localhost:3001/api/farms | head  # → the farms from the dump
 ```
 
 Photos: the dump holds the `photos` rows, not the bytes. The bytes are in the private Supabase Storage bucket
-(`poly-photos`), which this drill does not copy. A photo row restored without its object shows a broken image.
-Bucket backup is a separate follow-up (PT43-fu5).
+(`poly-photos`): back them up with 1.6 at the same time as the dump and drill them with 1.7. A photo row restored
+without its object shows a broken image.
 
-Clean up: `docker rm -f poly-restore`.
+Clean up (after 1.7 if you are drilling photos too): `docker rm -f poly-restore`.
 
 ### 1.5 Restoring for real
 
@@ -111,6 +116,116 @@ Only after a drill has passed with the same dump. Restore into the empty `poly` 
 role (`POLY_TRACKER_MIGRATION_URL`, DDL-capable), not `poly_app`, and never with `--clean`: if `poly` still has
 tables, rename the schema aside (`ALTER SCHEMA poly RENAME TO poly_broken_<date>;`), recreate `poly` from
 `db/init`, then load only the data (`pg_restore`/`psql` of a `--data-only` dump). Re-run `GRANT`s from `db/init`.
+Then put the photo bytes back with 1.7's script and `--bucket poly-photos --into-production` (it never overwrites
+an object that is already there).
+
+### 1.6 Back up the photo bytes (PT47)
+
+Right after the dump in 1.1, same shell. The script lists the bucket and downloads every object to a dated folder.
+It is **read-only against Storage** (it lists and reads; it never uploads, signs, moves or deletes), and it checks
+the folder against the `photos` table: every row's object must be there. Same environment as the API:
+
+```bash
+cd api
+export DATABASE_URL="$POLY_TRACKER_DATABASE_URL" PGSSL=true
+export PHOTO_BACKEND=supabase SUPABASE_URL='https://<project-ref>.supabase.co'
+read -rs SUPABASE_SERVICE_ROLE_KEY && export SUPABASE_SERVICE_ROLE_KEY   # paste it (from Vercel); not echoed
+npx tsx scripts/backup-photos.ts --out ../backups/photos-$(date +%F)
+```
+
+It prints `N listed · N downloaded · N already here · 0 failed`, then the folder's file count and bytes, the
+`photos` row count, `missing: 0` and `unclaimed (orphans): N`, and ends `✓ <folder>`. Exit `0` only when every
+`photos` row has its bytes in the folder and the folder's count and bytes equal `manifest.json`; `1` otherwise.
+
+- **Resumable.** Re-run with the same `--out` after a failure or a Ctrl+C: files already there at the size the
+  bucket lists are kept, only the rest are fetched. Downloads land as `*.partial` and are renamed when complete.
+- **`missing` must be 0.** A missing object is a row whose photo is already gone from the bucket, which no
+  backup can fix; note the keys in the log.
+- **`unclaimed`** objects are orphans (PT27). They are backed up anyway and are not a failure.
+- `backups/` is gitignored. Copy the folder (with `manifest.json`) to the same place as the dump.
+
+Self-hosted (disk storage): leave `PHOTO_BACKEND` unset and set `PHOTO_STORAGE_PATH` to the photo volume instead.
+
+### 1.7 Restore drill for the photo bytes (PT47)
+
+Never drill into `poly-photos`. Restore into a **throwaway bucket** in the same project, then delete it:
+
+1. Supabase dashboard → Storage → **New bucket** → name `poly-photos-restore-<YYYY-MM-DD>`, **Private** → Create.
+2. Restore. Each file's size and sha256 are checked against `manifest.json` first, and nothing is overwritten:
+
+   ```bash
+   cd api
+   export SUPABASE_URL='https://<project-ref>.supabase.co'
+   read -rs SUPABASE_SERVICE_ROLE_KEY && export SUPABASE_SERVICE_ROLE_KEY
+   npx tsx scripts/restore-photos.ts --from ../backups/photos-<date> --bucket poly-photos-restore-<YYYY-MM-DD>
+   ```
+
+   Pass = `N restored · 0 already there (left as they were) · 0 corrupt in the backup · 0 failed · 0 not in the
+   target afterwards` and `✓ every manifest object is in Supabase bucket …`, with N equal to the backup's object
+   count. The script refuses `--bucket poly-photos` (or whatever `SUPABASE_PHOTO_BUCKET` names) unless
+   `--into-production`.
+3. Prove a restored photo opens: point a local API at the restored rows (1.4) **and** the throwaway bucket:
+
+   ```bash
+   DATABASE_URL="$RESTORE_URL" PHOTO_BACKEND=supabase SUPABASE_PHOTO_BUCKET=poly-photos-restore-<YYYY-MM-DD> npm run dev
+   # second shell:
+   id=$(docker exec -i poly-restore psql -U postgres -At -c "SELECT id FROM poly.photos LIMIT 1")
+   curl -sL -o /tmp/photo -w '%{http_code} %{content_type}\n' "localhost:3001/api/photos/file/$id"   # → 200 image/…
+   ```
+
+4. Delete the throwaway bucket: Storage → `poly-photos-restore-<date>` → **Empty bucket**, then **Delete bucket**.
+
+**Fully offline variant** (no Supabase at all): `--dir /tmp/poly-restore-photos` instead of `--bucket …` restores
+into a folder. The restored rows hold bare object keys and the disk backend serves absolute paths, so rewrite them
+in the **throwaway** database only, then serve with the disk backend:
+
+```bash
+npx tsx scripts/restore-photos.ts --from ../backups/photos-<date> --dir /tmp/poly-restore-photos
+docker exec -i poly-restore psql -U postgres -c "UPDATE poly.photos SET path = '/tmp/poly-restore-photos/' || path"
+DATABASE_URL="$RESTORE_URL" PHOTO_STORAGE_PATH=/tmp/poly-restore-photos npm run dev    # then the curl in step 3
+```
+
+### 1.8 The weekly `Backup` workflow (PT47)
+
+`.github/workflows/backup.yml` runs 1.1 and 1.6 every Monday at 03:17 UTC (and on **Run workflow**), packs both
+into **one encrypted file**, proves it decrypts and holds every photo object and the dump, and uploads it as a
+workflow artifact kept **35 days**. A failure opens (or comments on) an issue titled `Backup failed`, label
+`ops-alarm`.
+
+**Why encrypted:** this repository is public, and a public repository's workflow artifacts can be downloaded by
+any signed-in GitHub user. The artifact is `tar | gpg --symmetric --cipher-algo AES256`; nothing leaves the job in
+plain text.
+
+**Repository secrets** (GitHub → Settings → Secrets and variables → Actions → New repository secret). The job fails
+at its first step, naming each one that is missing:
+
+| Secret | Value |
+|---|---|
+| `POLY_TRACKER_DATABASE_URL` | the `poly_app` pooler DSN, exactly as in Vercel's `DATABASE_URL` (no `?sslmode=`) |
+| `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | the service role key (see the rotation table: shared by every app in the project) |
+| `BACKUP_PASSPHRASE` | a new long random string (2.1 step 1). **Keep a copy outside GitHub** (password manager): GitHub cannot show it back, and without it every artifact is unreadable |
+
+Rotate `POLY_TRACKER_DATABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` here too whenever section 2 rotates them in
+Vercel. Changing `BACKUP_PASSPHRASE` leaves older artifacts readable only with the old one.
+
+**Restore from an artifact:** Actions → Backup → a green run → Artifacts → `poly-backup-<stamp>` (a zip holding
+`poly-backup-<stamp>.tar.gpg`). Then, in Git Bash (gpg ships with Git for Windows), from the repo root:
+
+```bash
+mkdir -p backups/restore && cd backups/restore
+unzip ~/Downloads/poly-backup-<stamp>.zip
+read -rs BACKUP_PASSPHRASE   # paste it; not echoed, not in shell history
+gpg --batch --pinentry-mode loopback --passphrase-fd 3 --decrypt poly-backup-<stamp>.tar.gpg 3<<<"$BACKUP_PASSPHRASE" | tar -xf -
+unset BACKUP_PASSPHRASE
+ls   # poly_schema_<stamp>.sql  photos/
+```
+
+and drill from there: 1.2 to 1.4 with `backups/restore/poly_schema_<stamp>.sql`, 1.7 with
+`--from ../backups/restore/photos`.
+
+GitHub disables scheduled workflows in a public repository after **60 days without a commit**. If the Actions tab
+shows that banner, re-enable the workflow there; the `Backup failed` issue cannot fire for a run that never starts.
 
 ---
 
@@ -123,8 +238,8 @@ tables, rename the schema aside (`ALTER SCHEMA poly RENAME TO poly_broken_<date>
 | `API_WRITE_TOKEN` | Vercel env; each device's Settings page (localStorage) | 90 days | a device is lost, someone leaves, it is seen in a screenshot/log/chat |
 | `API_READ_TOKEN` (if set) | Vercel env; Settings page | 90 days | as above |
 | `AUTH_SESSION_SECRET` (users mode) | Vercel env | 180 days | any suspicion; it signs every session cookie |
-| `poly_app` DB password | Vercel `DATABASE_URL`; `backlog_bandit/.env` `POLY_TRACKER_DATABASE_URL` | 180 days | the DSN appears anywhere it should not |
-| `SUPABASE_SERVICE_ROLE_KEY` | Vercel env | on suspicion only | **shared by every app in the project**: rotating it breaks Our_Menu and Cortana until they are updated too; plan it across all three |
+| `poly_app` DB password | Vercel `DATABASE_URL`; `backlog_bandit/.env` `POLY_TRACKER_DATABASE_URL`; GitHub secret `POLY_TRACKER_DATABASE_URL` (PT47) | 180 days | the DSN appears anywhere it should not |
+| `SUPABASE_SERVICE_ROLE_KEY` | Vercel env; GitHub secret (PT47 backup) | on suspicion only | **shared by every app in the project**: rotating it breaks Our_Menu and Cortana until they are updated too; plan it across all three |
 | `VITE_MAPBOX_TOKEN` | Vercel env (public by design) | not scheduled | keep its URL restriction set in the Mapbox dashboard |
 
 ### 2.1 API write / read token
@@ -201,9 +316,9 @@ Add it to `vercel.json` **and** let `web/src/lib/csp.test.ts` tell you if the co
 
 ### Backup / restore drills
 
-| Date | Who | Dump file (size, tables, COPY blocks) | Restored counts match live? | Notes |
-|---|---|---|---|---|
-| | | | | never run yet |
+| Date | Who | Dump file (size, tables, COPY blocks) | Restored counts match live? | Photos (objects, bytes, missing; restored into) | Notes |
+|---|---|---|---|---|---|
+| | | | | | never run yet |
 
 ### Rotations
 

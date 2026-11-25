@@ -20,6 +20,9 @@
 #
 # Usage:
 #   POLY_TRACKER_DATABASE_URL="postgres://…" scripts/backup_poly_schema.sh [outdir]
+#
+# BACKUP_PG_DUMP=docker skips a host pg_dump even when one is installed (PT47: a
+# runner's preinstalled pg_dump can be older than the server, and then refuses to dump).
 set -euo pipefail
 
 DSN="${POLY_TRACKER_DATABASE_URL:-${DATABASE_URL:-}}"
@@ -36,7 +39,7 @@ OUT="$OUT_DIR/poly_schema_${STAMP}.sql"
 # something. --no-owner/--no-privileges because the restoring role differs.
 PGDUMP_ARGS=(--schema=poly --no-owner --no-privileges --format=plain)
 
-if command -v pg_dump >/dev/null 2>&1; then
+if [ "${BACKUP_PG_DUMP:-}" != docker ] && command -v pg_dump >/dev/null 2>&1; then
   echo "→ using host pg_dump ($(pg_dump --version))"
   pg_dump "${PGDUMP_ARGS[@]}" --dbname="$DSN" > "$OUT.partial"
 elif command -v docker >/dev/null 2>&1; then

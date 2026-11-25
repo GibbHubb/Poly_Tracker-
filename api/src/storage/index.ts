@@ -35,11 +35,19 @@ export interface PhotoStore {
    * orphan sweep can diff it against `photos.path`.
    */
   list(): Promise<StoredObject[]>;
+  /**
+   * PT47 — the stored bytes for a key `list()` returned, for the photo backup.
+   * Read-only: never creates, moves or signs anything. Throws when the object
+   * cannot be read (a backup must not record a missing photo as an empty one).
+   */
+  read(key: string): Promise<Buffer>;
 }
 
 export interface StoredObject {
   key: string;
   modifiedAt: Date;
+  /** PT47 — byte size when the backend reports it; the backup checks each download against it. */
+  size?: number;
 }
 
 export type ResolvedPhoto =

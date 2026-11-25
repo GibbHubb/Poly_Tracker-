@@ -155,6 +155,10 @@ branch-scoped environment variable so only that branch is affected.
   env as the API) lists them; `--apply` removes those older than 24 h. It refuses
   to apply when `photos` is empty but the bucket is not (the wrong-database
   shape) unless `--allow-empty-table`. Not scheduled: run it by hand.
+- **Photo backups (PT47).** The `poly` dump holds `photos` rows, not bytes. `api/scripts/backup-photos.ts`
+  (read-only, resumable, checked against `photos`) and `restore-photos.ts` (throwaway bucket, never overwrites),
+  plus the weekly encrypted `Backup` workflow and the four repository secrets it needs, are in
+  [`docs/security/operations.md`](docs/security/operations.md) §1.6 to §1.8.
 - **The basemap does not fall back.** With `VITE_MAPBOX_TOKEN` unset the app
   still asks Mapbox with an empty `access_token` and the map goes blank — Esri
   is a provider you *choose* in the layer switcher, not an automatic fallback

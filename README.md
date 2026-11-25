@@ -114,6 +114,11 @@ machine instead, use `docker-compose.prod.yml` (above), persist the `db_data` an
 volumes, keep `PHOTO_BACKEND` unset (disk storage), and terminate TLS in front of nginx: the
 service worker and geolocation need a secure context off `localhost`.
 
+`web/nginx.prod.conf` sends the same security headers as Vercel (CSP, nosniff, `X-Frame-Options: DENY`,
+Referrer-Policy; PT48). Change them in `vercel.json` and in nginx together: `web/src/lib/nginxHeaders.test.ts`
+fails while they differ, and CI runs the real nginx image against `scripts/check-nginx-headers.mjs`. HSTS is not
+set here (Vercel adds it itself); set it where TLS terminates.
+
 ### Public access (Cloudflare named tunnel)
 
 To expose a self-hosted stack on a **stable public URL** (survives restarts), use a Cloudflare

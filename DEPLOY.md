@@ -20,7 +20,7 @@ problem.
 
 | File | What it does |
 |---|---|
-| `vercel.json` | static build from `web/`, `/api/*` → the function, SPA fallback for everything else, `no-cache` on `sw.js`, and (PT43) the SPA's security headers — CSP, nosniff, `X-Frame-Options: DENY`, Referrer-Policy — on every non-`/api` path. A new external host (tiles, a fetch) must be added to its CSP; `web/src/lib/csp.test.ts` fails until it is |
+| `vercel.json` | static build from `web/`, `/api/*` → the function, SPA fallback for everything else, `no-cache` on `sw.js`, and (PT43) the SPA's security headers — CSP, nosniff, `X-Frame-Options: DENY`, Referrer-Policy — on every non-`/api` path. A new external host (tiles, a fetch) must be added to its CSP; `web/src/lib/csp.test.ts` fails until it is. The self-hosted `web/nginx.prod.conf` sends the same headers (PT48); `web/src/lib/nginxHeaders.test.ts` fails until both match |
 | `api/src/vercel.ts` | re-exports the Express `app` as the function handler. It lives inside `src/` because `tsconfig` sets `rootDir=src` |
 | `api/src/db.ts` | caps the pool at 1 when `VERCEL` is set — a serverless deploy runs many short-lived instances against one Postgres, and a default pool of 10 per instance multiplies into connection exhaustion |
 

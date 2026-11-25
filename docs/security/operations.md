@@ -177,6 +177,10 @@ curl -sI https://poly-tracker-ashy.vercel.app/api/health | grep -iE 'content-sec
 
 Expect the SPA CSP on `/` and `default-src 'none'` on `/api/health`, never both on one response.
 
+Self-hosted (`docker-compose.prod.yml`), the SPA headers come from `web/nginx.prod.conf` (PT48), kept equal to
+`vercel.json` by `web/src/lib/nginxHeaders.test.ts`. Check a running stack with
+`node scripts/check-nginx-headers.mjs http://localhost:8080` (CI runs the same check against the nginx image).
+
 Two things the CSP assumes, which will bite when they change:
 
 - **Supabase is reached at `https://*.supabase.co`.** The magic-link call (`connect-src`) and the signed photo

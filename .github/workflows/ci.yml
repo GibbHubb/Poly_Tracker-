@@ -87,7 +87,16 @@ jobs:
           docker run --rm --add-host api:127.0.0.1 -v "$conf" nginx:1.27-alpine nginx -t
           docker run -d --name nginx-pt48 --add-host api:127.0.0.1 -p 8088:80 \
             -v "$conf" -v /tmp/nginx-html:/usr/share/nginx/html:ro nginx:1.27-alpine
-          for i in $(seq 1 20); do curl -s -o /dev/null http://localhost:8088/ && break; sleep 1; done
+          up=0
+          for i in $(seq 1 20); do
+            if curl -s -o /dev/null http://localhost:8088/; then up=1; break; fi
+            sleep 1
+          done
+          if [ "$up" -ne 1 ]; then
+            echo "::error::nginx did not answer on :8088 within 20 s"
+            docker logs nginx-pt48 || true
+            exit 1
+          fi
           node scripts/check-nginx-headers.mjs http://localhost:8088
 
       # API

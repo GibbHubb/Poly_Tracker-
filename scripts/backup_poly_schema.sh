@@ -47,9 +47,16 @@ elif command -v docker >/dev/null 2>&1; then
   # An older pg_dump refuses outright, which is better than a subtly partial
   # dump — but there is no reason to accept the failure when the version is
   # knowable.
-  MAJOR=$(docker run --rm postgres:16 psql "$DSN" -At -c 'show server_version_num' 2>/dev/null | cut -c1-2 || echo 16)
+  # No fallback: if the probe cannot read the version, pg_dump cannot reach the server either,
+  # and a guessed image only turns that into a more confusing error.
+  MAJOR=$(docker run --rm postgres:16 psql "$DSN" -At -c 'show server_version_num' 2>/dev/null | cut -c1-2 || true)
+  if ! [[ "$MAJOR" =~ ^[0-9]{2}$ ]]; then
+    echo "FAILED: could not read the server version through the DSN (got '${MAJOR}')." >&2
+    echo "  Check the DSN: host, password, session-mode port 5432 on the pooler, no ?sslmode=." >&2
+    exit 1
+  fi
   IMAGE="postgres:${MAJOR}"
-  echo "→ host pg_dump absent; using ${IMAGE} in docker"
+  echo "→ using ${IMAGE} in docker (no host pg_dump, or BACKUP_PG_DUMP=docker)"
   docker run --rm -i "$IMAGE" pg_dump "${PGDUMP_ARGS[@]}" --dbname="$DSN" > "$OUT.partial"
 else
   echo "neither pg_dump nor docker is available — cannot take a dump." >&2

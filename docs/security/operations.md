@@ -139,6 +139,8 @@ It prints `N listed · N downloaded · N already here · 0 failed`, then the fol
 
 - **Resumable.** Re-run with the same `--out` after a failure or a Ctrl+C: files already there at the size the
   bucket lists are kept, only the rest are fetched. Downloads land as `*.partial` and are renamed when complete.
+  Resume **trusts a same-size local file** without comparing its bytes with the bucket's. For a clean backup
+  (after a disk problem, or whenever in doubt) point `--out` at a new, empty folder.
 - **`missing` must be 0.** A missing object is a row whose photo is already gone from the bucket, which no
   backup can fix; note the keys in the log.
 - **`unclaimed`** objects are orphans (PT27). They are backed up anyway and are not a failure.
@@ -160,9 +162,12 @@ Never drill into `poly-photos`. Restore into a **throwaway bucket** in the same 
    npx tsx scripts/restore-photos.ts --from ../backups/photos-<date> --bucket poly-photos-restore-<YYYY-MM-DD>
    ```
 
-   Pass = `N restored · 0 already there (left as they were) · 0 corrupt in the backup · 0 failed · 0 not in the
-   target afterwards` and `✓ every manifest object is in Supabase bucket …`, with N equal to the backup's object
-   count. The script refuses `--bucket poly-photos` (or whatever `SUPABASE_PHOTO_BUCKET` names) unless
+   Pass = `N restored · 0 already there (left as they were, size checked below) · 0 corrupt in the backup ·
+   0 failed · 0 not in the target afterwards · 0 wrong size in the target` and `✓ every manifest object is in
+   Supabase bucket … at the manifest's size`, with N equal to the backup's object count. After uploading, the
+   script lists the bucket and compares every object's size with the manifest, including objects that were
+   already there: an object of another size under the same name fails the drill. If `SUPABASE_PHOTO_BUCKET` is
+   unset it warns that the production guard is comparing against the default `poly-photos`. The script refuses `--bucket poly-photos` (or whatever `SUPABASE_PHOTO_BUCKET` names) unless
    `--into-production`.
 3. Prove a restored photo opens: point a local API at the restored rows (1.4) **and** the throwaway bucket:
 
@@ -201,7 +206,7 @@ at its first step, naming each one that is missing:
 
 | Secret | Value |
 |---|---|
-| `POLY_TRACKER_DATABASE_URL` | the `poly_app` pooler DSN, exactly as in Vercel's `DATABASE_URL` (no `?sslmode=`) |
+| `POLY_TRACKER_DATABASE_URL` | the `poly_app` DSN on the pooler's **session mode, port 5432**, exactly the shape in DEPLOY.md and the value recorded as `POLY_TRACKER_DATABASE_URL` in `backlog_bandit/.env` (no `?sslmode=`). pg_dump needs a session: the transaction-mode port **6543** (which the API may use on Vercel, see `api/src/db.ts`) does not hold one, so if Vercel's `DATABASE_URL` is on 6543, change only the port. Not the direct `db.<ref>.supabase.co` host either: it is IPv6-only and GitHub's runners have no IPv6 |
 | `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | the service role key (see the rotation table: shared by every app in the project) |
 | `BACKUP_PASSPHRASE` | a new long random string (2.1 step 1). **Keep a copy outside GitHub** (password manager): GitHub cannot show it back, and without it every artifact is unreadable |

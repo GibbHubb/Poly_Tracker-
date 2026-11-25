@@ -38,6 +38,12 @@ if (!from || (!bucket && !dir) || (bucket && dir)) {
 
 let target: RestoreTarget;
 if (bucket) {
+  if (!process.env.SUPABASE_PHOTO_BUCKET) {
+    console.warn(
+      'SUPABASE_PHOTO_BUCKET is not set: the production-bucket guard compares against the default, poly-photos. ' +
+        'If production uses another bucket, set SUPABASE_PHOTO_BUCKET to it so the guard protects it.',
+    );
+  }
   const refusal = checkRestoreBucket(
     bucket,
     process.env.SUPABASE_PHOTO_BUCKET ?? 'poly-photos',
@@ -62,13 +68,22 @@ try {
   console.log(`→ ${resolve(from)} → ${target.description}`);
   const r = await restorePhotos(target, { fromDir: resolve(from), log: (line) => console.log(line) });
   console.log(
-    `${r.created} restored · ${r.existed} already there (left as they were) · ${r.corrupt.length} corrupt in the backup · ` +
-      `${r.failed.length} failed · ${r.absent.length} not in the target afterwards`,
+    `${r.created} restored · ${r.existed} already there (left as they were, size checked below) · ` +
+      `${r.corrupt.length} corrupt in the backup · ${r.failed.length} failed · ` +
+      `${r.absent.length} not in the target afterwards · ${r.sizeMismatch.length} wrong size in the target`,
   );
   for (const f of r.corrupt) console.log(`  CORRUPT (size/sha256 differ from manifest) ${f}`);
   for (const f of r.failed) console.log(`  FAILED ${f.file}: ${f.error}`);
   for (const f of r.absent) console.log(`  ABSENT ${f}`);
-  if (r.ok) console.log(`✓ every manifest object is in ${target.description}`);
+  for (const m of r.sizeMismatch) {
+    console.log(`  WRONG SIZE ${m.file}: target ${m.actual ?? 'reports no size'}, manifest ${m.expected}`);
+  }
+  if (r.ok) {
+    console.log(
+      `✓ every manifest object is in ${target.description} at the manifest's size ` +
+        `(${r.created} restored, ${r.existed} already there and size-verified)`,
+    );
+  }
   else process.exitCode = 1;
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);

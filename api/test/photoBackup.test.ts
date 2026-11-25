@@ -12,11 +12,13 @@ import {
   backupPhotos,
   checkRestoreBucket,
   contentTypeFor,
+  invalidBucketName,
   createDiskRestoreTarget,
   createSupabaseRestoreTarget,
   objectFileName,
   readManifest,
   restorePhotos,
+  type RestoreTarget,
 } from '../src/lib/photoBackup.js';
 import { createDiskStore } from '../src/storage/disk.js';
 import { createSupabaseStore } from '../src/storage/supabase.js';
@@ -177,17 +179,66 @@ describe('restorePhotos (PT47)', () => {
     for (const p of photos) expect(readFileSync(join(throwaway, objectFileName(p.key)))).toEqual(p.bytes);
   });
 
-  it('never overwrites: an object already in the target is counted and left as it was', async () => {
+  it('never overwrites; an object already there at the manifest size counts as restored', async () => {
     const { store, photos } = await seededStore(2);
     const outDir = tmp('pt47-out-');
     await backupPhotos(store, photos.map((p) => p.key), { outDir });
     const throwaway = tmp('pt47-restore-');
-    const already = join(throwaway, objectFileName(photos[0]!.key));
-    writeFileSync(already, 'newer bytes');
+    writeFileSync(join(throwaway, objectFileName(photos[0]!.key)), photos[0]!.bytes);
 
     const r = await restorePhotos(createDiskRestoreTarget(throwaway), { fromDir: outDir });
-    expect(r).toMatchObject({ ok: true, created: 1, existed: 1 });
-    expect(readFileSync(already, 'utf8')).toBe('newer bytes');
+    expect(r).toMatchObject({ ok: true, created: 1, existed: 1, sizeMismatch: [] });
+  });
+
+  it('an object already there with different bytes is left alone AND fails the restore (wrong size)', async () => {
+    const { store, photos } = await seededStore(2);
+    const outDir = tmp('pt47-out-');
+    await backupPhotos(store, photos.map((p) => p.key), { outDir });
+    const throwaway = tmp('pt47-restore-');
+    const name = objectFileName(photos[0]!.key);
+    writeFileSync(join(throwaway, name), 'newer bytes');
+
+    const r = await restorePhotos(createDiskRestoreTarget(throwaway), { fromDir: outDir });
+    expect(r).toMatchObject({ ok: false, created: 1, existed: 1 });
+    expect(r.sizeMismatch).toEqual([{ file: name, expected: photos[0]!.bytes.length, actual: 'newer bytes'.length }]);
+    expect(readFileSync(join(throwaway, name), 'utf8')).toBe('newer bytes');
+  });
+
+  it('fails when the target lists an upload at the wrong size, or reports no size at all', async () => {
+    const { store, photos } = await seededStore(3);
+    const outDir = tmp('pt47-out-');
+    await backupPhotos(store, photos.map((p) => p.key), { outDir });
+    const [a, b, c] = photos.map((p) => objectFileName(p.key));
+    // A target that accepts every upload but stores the first short and drops the size of the second.
+    const lossy: RestoreTarget = {
+      description: 'lossy',
+      upload: async () => 'created',
+      sizes: async () =>
+        new Map<string, number | undefined>([
+          [a!, photos[0]!.bytes.length - 1],
+          [b!, undefined],
+          [c!, photos[2]!.bytes.length],
+        ]),
+    };
+
+    const r = await restorePhotos(lossy, { fromDir: outDir });
+    expect(r.ok).toBe(false);
+    expect(r.absent).toEqual([]);
+    expect(r.sizeMismatch.sort((x, y) => x.file.localeCompare(y.file))).toEqual(
+      [
+        { file: a!, expected: photos[0]!.bytes.length, actual: photos[0]!.bytes.length - 1 },
+        { file: b!, expected: photos[1]!.bytes.length, actual: null },
+      ].sort((x, y) => x.file.localeCompare(y.file)),
+    );
+  });
+
+  it('fails when an "exists" answer is not backed by the listing (the object is absent)', async () => {
+    const { store, photos } = await seededStore(1);
+    const outDir = tmp('pt47-out-');
+    await backupPhotos(store, photos.map((p) => p.key), { outDir });
+    const liar: RestoreTarget = { description: 'liar', upload: async () => 'exists', sizes: async () => new Map() };
+    const r = await restorePhotos(liar, { fromDir: outDir });
+    expect(r).toMatchObject({ ok: false, existed: 1, absent: [objectFileName(photos[0]!.key)] });
   });
 
   it('refuses to restore a file whose bytes no longer match the manifest', async () => {
@@ -212,6 +263,44 @@ describe('restore target guard (PT47)', () => {
     expect(checkRestoreBucket('poly-photos', 'poly-photos', true)).toBeNull();
     expect(checkRestoreBucket('poly-photos-restore-2026-11-25', 'poly-photos', false)).toBeNull();
     expect(checkRestoreBucket('', 'poly-photos', false)).toMatch(/--bucket/);
+  });
+
+  it('CONTROL: a traversal bucket name really does land on the production bucket once a URL normalises it', () => {
+    // Why the guard below must exist: this is what fetch does with the path before sending it.
+    const url = new URL('https://example.supabase.co/storage/v1/object/x/../poly-photos/a.jpg');
+    expect(url.pathname).toBe('/storage/v1/object/poly-photos/a.jpg');
+    // And a plain string compare does not see it.
+    const asTyped: string = 'x/../poly-photos';
+    const production: string = 'poly-photos';
+    expect(asTyped === production).toBe(false);
+  });
+
+  it('refuses the traversal bucket that the plain string compare let through', () => {
+    for (const evil of ['x/../poly-photos', '../poly-photos', 'poly-photos/..', 'x/../../poly-photos', 'a..b']) {
+      expect(checkRestoreBucket(evil, 'poly-photos', false)).toMatch(/not a bucket name/);
+      // Even --into-production does not make a malformed name acceptable.
+      expect(checkRestoreBucket(evil, 'poly-photos', true)).toMatch(/not a bucket name/);
+    }
+  });
+
+  it('accepts only plain bucket names, and compares against production case-insensitively', () => {
+    expect(invalidBucketName('poly-photos-restore-2026-11-25')).toBeNull();
+    expect(invalidBucketName('ab')).not.toBeNull(); // too short
+    expect(invalidBucketName('a'.repeat(64))).not.toBeNull(); // too long
+    expect(invalidBucketName('Poly-Photos')).not.toBeNull(); // upper case
+    expect(invalidBucketName('-poly')).not.toBeNull();
+    expect(invalidBucketName('poly photos')).not.toBeNull();
+    expect(invalidBucketName('poly%2Fphotos')).not.toBeNull();
+    expect(checkRestoreBucket('poly-photos', 'Poly-Photos', false)).toMatch(/production photo bucket/);
+  });
+
+  it('the Supabase target itself refuses a traversal bucket before any request', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    expect(() =>
+      createSupabaseRestoreTarget({ url: 'https://example.supabase.co', serviceKey: 'k', bucket: 'x/../poly-photos' }),
+    ).toThrow(/not a bucket name/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('names content types for every extension put() writes', () => {
@@ -286,5 +375,31 @@ describe('Supabase calls behind the backup (PT47, fetch stubbed)', () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(`https://example.supabase.co/storage/v1/object/poly-photos-restore-2026-11-25/${name}`);
     expect((init.headers as Record<string, string>)['x-upsert']).toBe('false');
+  });
+
+  it('the restore target reports each object size from the listing metadata', async () => {
+    const other = `${randomUUID()}.png`;
+    const fetchMock = vi.fn(async () =>
+      Response.json([
+        { name, id: 'a', metadata: { size: 10 } },
+        { name: other, id: 'b', metadata: null },
+        { name: 'folder', id: null },
+        { name: '.emptyFolderPlaceholder', id: 'c', metadata: { size: 0 } },
+      ]),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const target = createSupabaseRestoreTarget({
+      url: 'https://example.supabase.co',
+      serviceKey: 'service-role-key',
+      bucket: 'poly-photos-restore-2026-11-25',
+    });
+    expect(await target.sizes()).toEqual(
+      new Map<string, number | undefined>([
+        [name, 10],
+        [other, undefined],
+      ]),
+    );
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toBe('https://example.supabase.co/storage/v1/object/list/poly-photos-restore-2026-11-25');
   });
 });

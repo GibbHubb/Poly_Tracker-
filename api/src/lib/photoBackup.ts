@@ -97,6 +97,9 @@ export async function backupPhotos(
     try {
       const have = await sizeOf(target);
       let buf: Buffer;
+      // Resume trusts a local file of the listed size (or any size, when the store lists none):
+      // its bytes are NOT compared with the store's, only hashed into the manifest. A same-size
+      // file that is wrong stays wrong. For a clean backup, point --out at a new, empty folder.
       if (have !== null && (o.size === undefined || have === o.size)) {
         buf = await readFile(target);
         skipped++;
@@ -157,17 +160,27 @@ export async function backupPhotos(
 export interface RestoreTarget {
   readonly description: string;
   upload(name: string, bytes: Buffer, contentType: string): Promise<'created' | 'exists'>;
-  /** The names now in the target, to prove the restore landed. */
-  names(): Promise<Set<string>>;
+  /**
+   * Every object now in the target with the byte size the target reports (undefined when it
+   * reports none), to prove the restore landed with the right bytes, not just the right names.
+   */
+  sizes(): Promise<Map<string, number | undefined>>;
 }
 
 export interface RestoreResult {
   created: number;
+  /** Already in the target and left as they were; counted only once their size matched too. */
   existed: number;
   corrupt: string[];
   failed: { file: string; error: string }[];
   /** Manifest objects not in the target after the run. Must be empty. */
   absent: string[];
+  /**
+   * In the target, but its size there differs from the manifest (or the target reports none).
+   * Covers objects that `existed` too: an older or different object under the same name is
+   * not a restored photo. Must be empty.
+   */
+  sizeMismatch: { file: string; expected: number; actual: number | null }[];
   ok: boolean;
 }
 
@@ -190,9 +203,25 @@ export function contentTypeFor(name: string): string {
  * (`--into-production`). A drill goes into a throwaway bucket; a slip of the flag must not
  * make it a write against the live one.
  */
+const BUCKET_NAME = /^[a-z0-9][a-z0-9._-]{2,62}$/;
+
+/**
+ * A bucket name that is safe to put in a URL path: no slash, no `..`, nothing to encode.
+ * Without this, `--bucket x/../poly-photos` passed the string compare below and fetch
+ * normalised the URL into the production bucket.
+ */
+export function invalidBucketName(bucket: string): string | null {
+  if (!BUCKET_NAME.test(bucket) || bucket.includes('..')) {
+    return `"${bucket}" is not a bucket name: 3-63 of a-z 0-9 . _ - , starting with a letter or digit, no "..".`;
+  }
+  return null;
+}
+
 export function checkRestoreBucket(bucket: string, productionBucket: string, intoProduction: boolean): string | null {
   if (!bucket) return 'Name the target bucket with --bucket <name>.';
-  if (bucket === productionBucket && !intoProduction) {
+  const invalid = invalidBucketName(bucket);
+  if (invalid) return invalid;
+  if (bucket.toLowerCase() === productionBucket.toLowerCase() && !intoProduction) {
     return (
       `"${bucket}" is the production photo bucket. A drill restores into a throwaway bucket ` +
       '(e.g. poly-photos-restore-<date>). For a real recovery add --into-production; it still never overwrites.'
@@ -211,7 +240,15 @@ export async function restorePhotos(
 ): Promise<RestoreResult> {
   const log = opts.log ?? (() => {});
   const manifest = await readManifest(opts.fromDir);
-  const result: RestoreResult = { created: 0, existed: 0, corrupt: [], failed: [], absent: [], ok: false };
+  const result: RestoreResult = {
+    created: 0,
+    existed: 0,
+    corrupt: [],
+    failed: [],
+    absent: [],
+    sizeMismatch: [],
+    ok: false,
+  };
 
   for (const e of manifest.objects) {
     if (!isStoredObjectName(e.file)) {
@@ -237,9 +274,23 @@ export async function restorePhotos(
     }
   }
 
-  const present = await target.names();
-  result.absent = manifest.objects.map((e) => e.file).filter((f) => !present.has(f)).sort();
-  result.ok = result.corrupt.length === 0 && result.failed.length === 0 && result.absent.length === 0;
+  // Prove every manifest object is in the target at the manifest's size, whether this run
+  // created it or found it there.
+  const present = await target.sizes();
+  for (const e of manifest.objects) {
+    if (!present.has(e.file)) {
+      result.absent.push(e.file);
+      continue;
+    }
+    const actual = present.get(e.file);
+    if (actual !== e.bytes) result.sizeMismatch.push({ file: e.file, expected: e.bytes, actual: actual ?? null });
+  }
+  result.absent.sort();
+  result.ok =
+    result.corrupt.length === 0 &&
+    result.failed.length === 0 &&
+    result.absent.length === 0 &&
+    result.sizeMismatch.length === 0;
   return result;
 }
 
@@ -257,13 +308,20 @@ export function createDiskRestoreTarget(root: string): RestoreTarget {
         throw err;
       }
     },
-    async names() {
+    async sizes() {
+      const out = new Map<string, number | undefined>();
+      let names: string[];
       try {
-        return new Set((await readdir(root)).filter(isStoredObjectName));
+        names = (await readdir(root)).filter(isStoredObjectName);
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return new Set();
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return out;
         throw err;
       }
+      for (const name of names) {
+        const size = await sizeOf(join(root, name));
+        if (size !== null) out.set(name, size);
+      }
+      return out;
     },
   };
 }
@@ -273,12 +331,16 @@ export function createDiskRestoreTarget(root: string): RestoreTarget {
  * `x-upsert: false`, so an object already there answers a conflict and is left as it is.
  */
 export function createSupabaseRestoreTarget(cfg: { url: string; serviceKey: string; bucket: string }): RestoreTarget {
+  // Checked here as well as in checkRestoreBucket: this is where the name becomes a URL.
+  const invalid = invalidBucketName(cfg.bucket);
+  if (invalid) throw new Error(invalid);
+  const bucket = encodeURIComponent(cfg.bucket);
   const url = cfg.url.replace(/\/+$/, '');
   const auth = { apikey: cfg.serviceKey, Authorization: `Bearer ${cfg.serviceKey}` };
   return {
     description: `Supabase bucket ${cfg.bucket}`,
     async upload(name, bytes, contentType) {
-      const res = await fetch(`${url}/storage/v1/object/${cfg.bucket}/${encodeURI(name)}`, {
+      const res = await fetch(`${url}/storage/v1/object/${bucket}/${encodeURIComponent(name)}`, {
         method: 'POST',
         headers: { ...auth, 'Content-Type': contentType, 'x-upsert': 'false' },
         body: new Uint8Array(bytes),
@@ -290,18 +352,22 @@ export function createSupabaseRestoreTarget(cfg: { url: string; serviceKey: stri
       // Status only: the body can name buckets and policies.
       throw new Error(`upload failed: HTTP ${res.status}`);
     },
-    async names() {
+    async sizes() {
       const PAGE = 1000;
-      const out = new Set<string>();
+      const out = new Map<string, number | undefined>();
       for (let offset = 0; ; offset += PAGE) {
-        const res = await fetch(`${url}/storage/v1/object/list/${cfg.bucket}`, {
+        const res = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
           method: 'POST',
           headers: { ...auth, 'Content-Type': 'application/json' },
           body: JSON.stringify({ prefix: '', limit: PAGE, offset, sortBy: { column: 'name', order: 'asc' } }),
         });
         if (!res.ok) throw new Error(`list failed: HTTP ${res.status}`);
-        const page = (await res.json()) as { name: string; id: string | null }[];
-        for (const o of page) if (o.id !== null && isStoredObjectName(o.name)) out.add(o.name);
+        const page = (await res.json()) as { name: string; id: string | null; metadata?: { size?: number } | null }[];
+        for (const o of page) {
+          if (o.id === null || !isStoredObjectName(o.name)) continue;
+          const size = o.metadata?.size;
+          out.set(o.name, typeof size === 'number' ? size : undefined);
+        }
         if (page.length < PAGE) break;
       }
       return out;
